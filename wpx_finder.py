@@ -284,7 +284,10 @@ class WPXFinder:
         nf_plugins = set(re.findall(r'/wp-content/plugins/([^/\s"\'?]+)', nf_content))
 
         for slug in hp_plugins:
+            # Filter out our canary and any obviously invalid slugs (globs, short strings)
             if slug == "this-plugin-does-not-exist-xyz123":
+                continue
+            if not re.match(r'^[a-z0-9][a-z0-9\-]{1,}$', slug):
                 continue
             if slug not in self.found_plugins:
                 in_404 = slug in nf_plugins
@@ -318,12 +321,12 @@ class WPXFinder:
         total = len(backups)
         found = []
 
-        # Fetch a known-nonexistent path to detect soft-404 content length
+        # Fetch a known-nonexistent path (follow redirects) to detect soft-404 content length
         baseline_len = None
         try:
             canary = self.core.session.get(
                 f"{base}/wp-config-THIS-DOES-NOT-EXIST-xyz123.bak",
-                impersonate="firefox", timeout=10, allow_redirects=False,
+                impersonate="firefox", timeout=10, allow_redirects=True,
             )
             if canary.status_code == 200:
                 baseline_len = len(canary.content)
@@ -335,11 +338,15 @@ class WPXFinder:
             pct = (i + 1) / total * 100
             print(f"\r[*] Checking Config Backups - ({i + 1} / {total}) {pct:.2f}%", end="", flush=True)
             try:
-                res = self.core.session.get(url, impersonate="firefox", timeout=10, allow_redirects=False)
+                res = self.core.session.get(url, impersonate="firefox", timeout=10, allow_redirects=True)
                 if res.status_code == 200:
+                    body = res.content
+                    # Must contain PHP config file markers to be a real backup
+                    if not any(m in body for m in [b'<?php', b'DB_NAME', b'DB_PASSWORD']):
+                        continue
                     # Reject responses that match the soft-404 baseline (within 5%)
                     if baseline_len is not None:
-                        body_len = len(res.content)
+                        body_len = len(body)
                         if body_len > 0 and abs(body_len - baseline_len) / baseline_len < 0.05:
                             continue
                     found.append(url)
