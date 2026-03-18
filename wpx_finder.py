@@ -1,6 +1,6 @@
+import asyncio
 import re
 from lxml import html
-from concurrent.futures import ThreadPoolExecutor
 
 XMLRPC_REFERENCES = [
     "http://codex.wordpress.org/XML-RPC_Pingback_API",
@@ -312,35 +312,11 @@ class WPXFinder:
 
     def scan_plugins(self, slugs, threads=20):
         print(f"[*] Brute-forcing {len(slugs)} plugins with {threads} threads...")
-        headers = dict(self.core.session.headers)
-        cookies = dict(self.core.cookies)
-        base_url = self.core.target_url.rstrip('/')
-
-        def check_plugin(slug):
-            plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
-            try:
-                from curl_cffi import requests as thread_requests
-                res = thread_requests.get(
-                    plugin_url,
-                    headers=headers,
-                    cookies=cookies,
-                    impersonate="firefox",
-                    timeout=10,
-                    allow_redirects=False,
-                )
-                if res.status_code in [200, 403]:
-                    return slug, res.status_code
-            except Exception:
-                pass
-            return None
-
-        with ThreadPoolExecutor(max_workers=threads) as executor:
-            results = list(executor.map(check_plugin, slugs))
-
+        results = asyncio.run(self._scan_plugins_async(slugs, threads))
         base = self.core.target_url.rstrip('/')
-        for res in results:
-            if res:
-                slug, status = res
+        for item in results:
+            if item:
+                slug, status = item
                 if slug not in self.found_plugins:
                     self.found_plugins[slug] = {
                         "status": status,
@@ -352,8 +328,36 @@ class WPXFinder:
                         "confirmed_by": None,
                         "location": f"{base}/wp-content/plugins/{slug}/",
                     }
-
         print(f"[+] Found {len(self.found_plugins)} plugins.")
+
+    async def _scan_plugins_async(self, slugs, concurrency):
+        from curl_cffi.requests import AsyncSession
+        base_url = self.core.target_url.rstrip('/')
+        headers = dict(self.core.session.headers)
+        cookies = dict(self.core.cookies)
+        sem = asyncio.Semaphore(concurrency)
+
+        async def check_plugin(session, slug):
+            plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
+            async with sem:
+                try:
+                    res = await session.get(
+                        plugin_url,
+                        headers=headers,
+                        cookies=cookies,
+                        impersonate="firefox",
+                        timeout=10,
+                        allow_redirects=False,
+                    )
+                    if res.status_code in [200, 403]:
+                        return slug, res.status_code
+                except Exception:
+                    pass
+            return None
+
+        async with AsyncSession() as session:
+            tasks = [check_plugin(session, slug) for slug in slugs]
+            return await asyncio.gather(*tasks)
 
     # ------------------------------------------------------------------
     # Version detection
@@ -410,42 +414,48 @@ class WPXFinder:
 
     def detect_versions(self):
         print("[*] Detecting plugin versions...")
-        headers = dict(self.core.session.headers)
-        cookies = dict(self.core.cookies)
-        base_url = self.core.target_url.rstrip('/')
-
-        def process_version(slug):
-            rules = self.data.get_plugin_rules(slug)
-            if not rules:
-                return slug, "Unknown", 0, None, None
-
-            readme_url = f"{base_url}/wp-content/plugins/{slug}/readme.txt"
-            try:
-                from curl_cffi import requests as thread_requests
-                res = thread_requests.get(
-                    readme_url,
-                    headers=headers,
-                    cookies=cookies,
-                    impersonate="firefox",
-                    timeout=10,
-                )
-                if res.status_code == 200:
-                    version, confidence, found_by, source_url = self.find_version_from_content(
-                        res.text, res.headers, rules
-                    )
-                    return slug, version, confidence, found_by, source_url or readme_url
-            except Exception:
-                pass
-            return slug, "Unknown", 0, None, None
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            results = list(executor.map(process_version, self.found_plugins.keys()))
-
+        results = asyncio.run(self._detect_versions_async())
         for slug, version, confidence, found_by, source_url in results:
             self.found_plugins[slug]["version"] = version
             self.found_plugins[slug]["version_confidence"] = confidence
             self.found_plugins[slug]["version_found_by"] = found_by
             self.found_plugins[slug]["version_url"] = source_url
+
+    async def _detect_versions_async(self):
+        from curl_cffi.requests import AsyncSession
+        base_url = self.core.target_url.rstrip('/')
+        headers = dict(self.core.session.headers)
+        cookies = dict(self.core.cookies)
+        sem = asyncio.Semaphore(10)
+        slugs = list(self.found_plugins.keys())
+
+        async def process_version(session, slug):
+            rules = self.data.get_plugin_rules(slug)
+            if not rules:
+                return slug, "Unknown", 0, None, None
+
+            readme_url = f"{base_url}/wp-content/plugins/{slug}/readme.txt"
+            async with sem:
+                try:
+                    res = await session.get(
+                        readme_url,
+                        headers=headers,
+                        cookies=cookies,
+                        impersonate="firefox",
+                        timeout=10,
+                    )
+                    if res.status_code == 200:
+                        version, confidence, found_by, source_url = self.find_version_from_content(
+                            res.text, res.headers, rules
+                        )
+                        return slug, version, confidence, found_by, source_url or readme_url
+                except Exception:
+                    pass
+            return slug, "Unknown", 0, None, None
+
+        async with AsyncSession() as session:
+            tasks = [process_version(session, slug) for slug in slugs]
+            return await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
