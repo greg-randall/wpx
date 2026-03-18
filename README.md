@@ -61,25 +61,33 @@ python3 wpx.py -u https://example.com --plugins-limit 500
 ```
 
 ### Full plugin brute-force
-Scan all available plugin slugs (up to 110,000+ if `data/plugins_full.txt` exists).
+Scan all available plugin slugs.
 **Warning**: This performs a massive number of requests and can take several hours to complete depending on your thread count and the target's responsiveness.
 ```bash
 python3 wpx.py -u https://example.com --full-scan
 ```
 
 ### Refresh plugin data
-To update the plugin list and rank by popularity:
+To update the plugin lists and rank by popularity:
 ```bash
 python3 data/wpx_fetch_plugins.py --sort-by score
+```
+
+Outputs `data/plugins_active.txt` (default top 5000) and `data/plugins_dead.txt` (default top 2500).
+To change the limits:
+```bash
+python3 data/wpx_fetch_plugins.py --active-limit 10000 --dead-limit 5000
 ```
 
 ## Data management
 
 The `data/` directory contains the processed plugin datasets and maintenance tools:
 
-*   **`data/plugins_full.txt`**: The master list of ~150,000 plugin slugs, ordered by popularity (active) and last-updated date (dead).
-*   **`data/plugins_dead.jsonl`**: An incremental, repo-bundled cache of "dead" or closed plugins including their last known activity date.
-*   **`data/wpx_fetch_plugins.py`**: A hybrid fetcher that combines the WordPress API and SVN repository to keep these lists current.
+*   **`data/plugins_active.txt`**: Top active plugin slugs ranked by popularity score (geometric mean of installs × downloads).
+*   **`data/plugins_dead.txt`**: Top closed/removed plugin slugs ranked by historical install count (sourced from previous catalog runs or Archive.org snapshots).
+*   **`data/plugins_dead.jsonl`**: Append-only cache of dead plugin metadata including last-known install counts. New entries override old ones on load (last-write-wins).
+*   **`data/archive.org-cache/`**: Raw HTML snapshots from the Wayback Machine, used to recover historical install counts for plugins closed before the first catalog run.
+*   **`data/wpx_fetch_plugins.py`**: Fetcher that combines the WordPress.org API, SVN repository, and Archive.org to build and enrich the plugin lists.
 
 ## Comparison with WPScan
 
