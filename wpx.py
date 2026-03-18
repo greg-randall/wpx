@@ -3,6 +3,7 @@ import argparse
 import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from wpx_data import WPXData
 from wpx_core import WPXCore
@@ -97,7 +98,17 @@ def main():
         finder.check_config_backups()
 
     # Active plugin brute-force
-    slugs = data.plugins if args.full_scan else data.plugins[:200]
+    if args.full_scan:
+        full_list = Path(".wpx_data/plugins_full.txt")
+        if full_list.exists():
+            with open(full_list) as f:
+                slugs = [line.strip() for line in f if line.strip()]
+            print_status(f"Full scan: {len(slugs):,} slugs from plugins_full.txt (run wpx_fetch_plugins.py to update)")
+        else:
+            slugs = data.plugins
+            print_status(f"Full scan: {len(slugs):,} slugs (run wpx_fetch_plugins.py to get all ~58k WP.org plugins)")
+    else:
+        slugs = data.plugins[:200]
     finder.scan_plugins(slugs, threads=args.threads)
 
     # Version detection
