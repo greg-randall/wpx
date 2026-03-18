@@ -22,7 +22,7 @@ from pathlib import Path
 
 DATA_DIR = Path(".wpx_data")
 CATALOG_FILE = DATA_DIR / "plugins_catalog.json"
-SLUGS_FILE = DATA_DIR / "plugins_full.txt"
+SLUGS_FILE = Path("plugins_full.txt")  # repo-bundled, not in .wpx_data/
 
 API_BASE = "https://api.wordpress.org/plugins/info/1.2/"
 PER_PAGE = 250
@@ -103,6 +103,18 @@ def main():
         action="store_true",
         help="Re-fetch everything even if catalog already exists",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Stop after fetching N plugins (0 = all, useful for testing)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print full metadata for each plugin in the final sorted list",
+    )
     args = parser.parse_args()
 
     DATA_DIR.mkdir(exist_ok=True)
@@ -129,9 +141,15 @@ def main():
     for p in first["plugins"]:
         catalog[p["slug"]] = extract(p)
 
+    def _limit_reached():
+        return args.limit > 0 and len(catalog) >= args.limit
+
     # Fetch remaining pages
     failed_pages = []
     for page in range(2, total_pages + 1):
+        if _limit_reached():
+            print(f"\n[*] --limit {args.limit} reached, stopping early.")
+            break
         pct = page / total_pages * 100
         print(
             f"\r[*] Page {page}/{total_pages} ({pct:.1f}%)  —  {len(catalog):,} plugins collected",
@@ -141,6 +159,8 @@ def main():
             data = fetch_page(page)
             for p in data.get("plugins", []):
                 catalog[p["slug"]] = extract(p)
+                if _limit_reached():
+                    break
         except Exception as e:
             print(f"\n[!] Page {page} failed: {e}")
             failed_pages.append(page)
@@ -166,10 +186,26 @@ def main():
     with open(SLUGS_FILE, "w") as f:
         f.write("\n".join(sorted_slugs) + "\n")
     print(f"[+] Slug list saved → {SLUGS_FILE}  (sorted by {args.sort_by})")
-    print(f"    Top 5 by {args.sort_by}:")
-    for slug in sorted_slugs[:5]:
-        meta = catalog[slug]
-        print(f"      {slug:40s}  installs={meta['active_installs']:>10,}  rating={meta['rating']}")
+
+    if args.debug:
+        print(f"\n[DEBUG] Full catalog ({len(sorted_slugs)} plugins, sorted by {args.sort_by}):")
+        for slug in sorted_slugs:
+            meta = catalog[slug]
+            score = sort_fn(meta)
+            print(
+                f"  {slug:40s}  score={score:>14.0f}"
+                f"  installs={meta['active_installs']:>10,}"
+                f"  downloaded={meta['downloaded']:>12,}"
+                f"  rating={meta['rating']:>5.1f}"
+                f"  num_ratings={meta['num_ratings']:>6,}"
+                f"  added={meta['added']}"
+                f"  updated={meta['last_updated']}"
+            )
+    else:
+        print(f"    Top 5 by {args.sort_by}:")
+        for slug in sorted_slugs[:5]:
+            meta = catalog[slug]
+            print(f"      {slug:40s}  installs={meta['active_installs']:>10,}  rating={meta['rating']}")
 
 
 if __name__ == "__main__":

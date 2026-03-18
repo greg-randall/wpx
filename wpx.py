@@ -99,11 +99,17 @@ def main():
 
     # Active plugin brute-force
     if args.full_scan:
-        full_list = Path(".wpx_data/plugins_full.txt")
-        if full_list.exists():
+        # Check repo-bundled list first, then fall back to .wpx_data/
+        for candidate in [Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
+            if candidate.exists():
+                full_list = candidate
+                break
+        else:
+            full_list = None
+        if full_list:
             with open(full_list) as f:
                 slugs = [line.strip() for line in f if line.strip()]
-            print_status(f"Full scan: {len(slugs):,} slugs from plugins_full.txt (run wpx_fetch_plugins.py to update)")
+            print_status(f"Full scan: {len(slugs):,} slugs from {full_list} (run wpx_fetch_plugins.py to update)")
         else:
             slugs = data.plugins
             print_status(f"Full scan: {len(slugs):,} slugs (run wpx_fetch_plugins.py to get all ~58k WP.org plugins)")
