@@ -30,6 +30,7 @@ class WPXFinder:
         self.core_files = {}
         self.config_backups = []
         self.homepage_content = None
+        self.theme_in_404 = False
 
     # ------------------------------------------------------------------
     # Headers
@@ -139,15 +140,20 @@ class WPXFinder:
             feed_url = f"{base}/feed/"
             try:
                 res = self.core.session.get(feed_url, impersonate="firefox", timeout=10)
-                rss_match = re.search(r'<generator>https://wordpress\.org/\?v=([\d.]+)', res.text)
-                if rss_match and rss_match.group(1) == version:
+                rss_match = re.search(
+                    r'(<generator>https://wordpress\.org/\?v=([\d.]+)</generator>)', res.text
+                )
+                if rss_match and rss_match.group(2) == version:
                     result["confirmed_by"] = {
                         "method": "Rss Generator (Aggressive Detection)",
                         "url": feed_url,
+                        "match": rss_match.group(1),
                     }
             except Exception:
                 pass
-            result["is_latest"], result["latest_version"] = self._check_wp_latest(version)
+            result["is_latest"], result["latest_version"], result["release_date"] = (
+                self._check_wp_latest(version)
+            )
             self.wp_version = result
             return result
 
@@ -155,17 +161,21 @@ class WPXFinder:
         feed_url = f"{base}/feed/"
         try:
             res = self.core.session.get(feed_url, impersonate="firefox", timeout=10)
-            match = re.search(r'<generator>https://wordpress\.org/\?v=([\d.]+)', res.text)
+            match = re.search(
+                r'(<generator>https://wordpress\.org/\?v=([\d.]+)</generator>)', res.text
+            )
             if match:
-                version = match.group(1)
+                version = match.group(2)
                 result = {
                     "version": version,
                     "found_by": "Rss Generator (Aggressive Detection)",
                     "found_url": feed_url,
-                    "found_match": f"?v={version}",
+                    "found_match": match.group(1),
                     "confirmed_by": None,
                 }
-                result["is_latest"], result["latest_version"] = self._check_wp_latest(version)
+                result["is_latest"], result["latest_version"], result["release_date"] = (
+                    self._check_wp_latest(version)
+                )
                 self.wp_version = result
                 return result
         except Exception:
@@ -175,7 +185,8 @@ class WPXFinder:
         return None
 
     def _check_wp_latest(self, version):
-        """Query api.wordpress.org. Returns (is_latest: bool|None, latest_version: str|None)."""
+        """Query api.wordpress.org + local metadata. Returns (is_latest, latest_version, release_date)."""
+        release_date = self.data.wp_metadata.get(version, {}).get("release_date")
         try:
             res = self.core.session.get(
                 "https://api.wordpress.org/core/version-check/1.7/",
@@ -184,9 +195,9 @@ class WPXFinder:
             )
             data = res.json()
             latest = data["offers"][0]["version"]
-            return version == latest, latest
+            return version == latest, latest, release_date
         except Exception:
-            return None, None
+            return None, None, release_date
 
     # ------------------------------------------------------------------
     # Theme details
@@ -207,6 +218,7 @@ class WPXFinder:
             "location": location,
             "style_url": style_url,
             "found_by": "Urls In Homepage (Passive Detection)",
+            "confirmed_by": "Urls In 404 Page (Passive Detection)" if self.theme_in_404 else None,
             "name": None,
             "description": None,
             "author": None,
@@ -290,6 +302,10 @@ class WPXFinder:
         theme_match = re.search(r'/wp-content/themes/([^/\s"\'?]+)', content)
         if theme_match:
             self.theme = theme_match.group(1)
+            nf_theme = re.search(
+                rf'/wp-content/themes/{re.escape(self.theme)}/', nf_content
+            )
+            self.theme_in_404 = bool(nf_theme)
 
     # ------------------------------------------------------------------
     # Config backups
@@ -391,46 +407,45 @@ class WPXFinder:
     # Version detection
     # ------------------------------------------------------------------
 
-    def find_version_from_content(self, content, headers, rules):
+    def find_version_from_content(self, content, headers, rules, slug=None):
         """
         Apply dynamic finder rules. Returns (version, confidence, found_by, source_url).
+        Handles HeaderPattern and QueryParameter rule types (CamelCase keys from YAML).
+        Readme/Stable-tag detection is handled separately in _detect_versions_async.
         """
         # 1. HeaderPattern
-        if "header_pattern" in rules:
-            for finder_name, config in rules["header_pattern"].items():
-                header_name = config["header_name"]
-                if header_name in headers:
-                    match = config["pattern"].search(headers[header_name])
+        if "HeaderPattern" in rules:
+            for finder_name, config in rules["HeaderPattern"].items():
+                header_name = config.get("header", "")
+                # Case-insensitive header lookup
+                val = next((v for k, v in headers.items() if k.lower() == header_name.lower()), None)
+                if val and "pattern" in config:
+                    match = config["pattern"].search(val)
                     if match:
                         return self._extract_version(match), 100, f"{finder_name} (Passive Detection)", None
 
-        # 2. BodyPattern
-        if "body_pattern" in rules:
-            for finder_name, config in rules["body_pattern"].items():
-                match = config["pattern"].search(content)
-                if match:
-                    return self._extract_version(match), 80, f"{finder_name} (Passive Detection)", None
-
-        # 3. QueryParameter (needs HTML — try homepage content if available)
-        if "query_parameter" in rules:
-            html_content = self.homepage_content or content
+        # 2. QueryParameter — match asset files listed in the rule against homepage HTML
+        if "QueryParameter" in rules and self.homepage_content:
+            qp = rules["QueryParameter"]
+            files = qp.get("files", []) if isinstance(qp, dict) else []
             try:
-                tree = html.fromstring(html_content)
-            except Exception:
-                tree = None
-            if tree is not None:
-                for finder_name, config in rules["query_parameter"].items():
-                    param = config["parameter_name"]
+                tree = html.fromstring(self.homepage_content)
+                for asset_path in files:
                     xpath = (
-                        f"//link[contains(@href, '{param}')] | "
-                        f"//script[contains(@src, '{param}')]"
+                        f"//link[contains(@href, '{asset_path}')] | "
+                        f"//script[contains(@src, '{asset_path}')]"
                     )
                     for el in tree.xpath(xpath):
-                        url = el.get('href') or el.get('src')
-                        if url and f"{param}=" in url:
-                            version = url.split(f"{param}=")[-1].split('&')[0]
-                            if version:
-                                return version, 100, f"{finder_name} (Passive Detection)", url
+                        url = el.get('href') or el.get('src') or ''
+                        # Require the URL to belong to this plugin's path
+                        if slug and f"/plugins/{slug}/" not in url:
+                            continue
+                        if 'ver=' in url:
+                            ver = url.split('ver=')[-1].split('&')[0].split('#')[0]
+                            if ver and re.match(r'^[\d.]+$', ver):
+                                return ver, 100, "QueryParameter (Passive Detection)", url
+            except Exception:
+                pass
 
         return "Unknown", 0, None, None
 
@@ -462,23 +477,42 @@ class WPXFinder:
             if not rules:
                 return slug, "Unknown", 0, None, None
 
-            readme_url = f"{base_url}/wp-content/plugins/{slug}/readme.txt"
-            async with sem:
-                try:
-                    res = await session.get(
-                        readme_url,
-                        headers=headers,
-                        cookies=cookies,
-                        impersonate="firefox",
-                        timeout=10,
-                    )
-                    if res.status_code == 200:
-                        version, confidence, found_by, source_url = self.find_version_from_content(
-                            res.text, res.headers, rules
+            base_plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
+
+            # 1. HeaderPattern + QueryParameter (no extra request needed)
+            version, confidence, found_by, source_url = self.find_version_from_content(
+                "", {}, rules, slug=slug
+            )
+            if version != "Unknown":
+                return slug, version, confidence, found_by, source_url
+
+            # 2. Readme — fetch and extract "Stable tag:"
+            if "Readme" in rules:
+                readme_rule = rules["Readme"]
+                readme_path = (
+                    readme_rule.get("path", "readme.txt")
+                    if isinstance(readme_rule, dict) else "readme.txt"
+                )
+                readme_url = f"{base_plugin_url}{readme_path}"
+                async with sem:
+                    try:
+                        res = await session.get(
+                            readme_url,
+                            headers=headers,
+                            cookies=cookies,
+                            impersonate="firefox",
+                            timeout=10,
                         )
-                        return slug, version, confidence, found_by, source_url or readme_url
-                except Exception:
-                    pass
+                        if res.status_code == 200:
+                            stable = re.search(
+                                r'Stable tag:\s*([\d.]+)', res.text, re.IGNORECASE
+                            )
+                            if stable:
+                                return (slug, stable.group(1), 100,
+                                        "Readme - Stable Tag (Aggressive Detection)", readme_url)
+                    except Exception:
+                        pass
+
             return slug, "Unknown", 0, None, None
 
         async with AsyncSession() as session:

@@ -59,6 +59,7 @@ def main():
     data.download_metadata()
     data.load_dynamic_finders()
     data.load_slugs()
+    data.load_wp_metadata()
 
     # 2. Bypass Cloudflare / WAF
     core = WPXCore(target_url)
@@ -175,7 +176,9 @@ def main():
         version = wv["version"]
 
         if wv.get("is_latest") is True:
-            ver_label = f"{version} identified ({GREEN}Latest{RESET})"
+            rd = wv.get("release_date")
+            rd_str = f", released on {rd}" if rd else ""
+            ver_label = f"{version} identified ({GREEN}Latest{rd_str}{RESET})"
         elif wv.get("is_latest") is False:
             latest = wv.get("latest_version", "?")
             ver_label = f"{version} identified ({YELLOW}Outdated, latest: {latest}{RESET})"
@@ -189,7 +192,8 @@ def main():
         if wv.get("confirmed_by"):
             cb = wv["confirmed_by"]
             subitems.append(f"Confirmed By: {cb['method']}")
-            subitems.append(f" - {cb['url']}")
+            match_str = f", Match: '{cb['match']}'" if cb.get("match") else ""
+            subitems.append(f" - {cb['url']}{match_str}")
 
         print_finding(f"WordPress version {ver_label}", subitems)
         print()
@@ -209,6 +213,8 @@ def main():
         if th.get("author"):
             subitems.append(f"Author: {th['author']}")
         subitems.append(f"Found By: {th['found_by']}")
+        if th.get("confirmed_by"):
+            subitems.append(f"Confirmed By: {th['confirmed_by']}")
         if th.get("version"):
             subitems.append(f"Version: {th['version']} ({th.get('version_confidence', '?')}% confidence)")
             subitems.append(f"Found By: {th['version_found_by']}")

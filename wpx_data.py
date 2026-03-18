@@ -1,6 +1,7 @@
-import os
-import yaml
+import json
+import re
 import urllib.request
+import yaml
 from pathlib import Path
 
 DATA_DIR = Path(".wpx_data")
@@ -11,10 +12,10 @@ FILES = [
     "themes.txt",
     "config_backups.txt",
     "db_exports.txt",
-    "wp_fingerprints.json"
+    "wp_fingerprints.json",
+    "metadata.json",
 ]
 
-import re
 
 class WPXData:
     def __init__(self, force_update=False):
@@ -23,7 +24,8 @@ class WPXData:
         self.dynamic_finders = {}
         self.plugins = []
         self.backups = []
-        
+        self.wp_metadata = {}
+
         # Handle !ruby/regexp tag
         yaml.add_constructor('!ruby/regexp', self._ruby_regexp_constructor, Loader=yaml.SafeLoader)
 
@@ -39,17 +41,15 @@ class WPXData:
                 flags |= re.IGNORECASE
             if 'm' in flags_str:
                 flags |= re.MULTILINE
-            
+
             # Ruby uses (?<v>...) for named groups. Python uses (?P<v>...)
-            # We can try to convert it or just strip the naming for detection
             pattern = pattern.replace('(?<', '(?P<')
-            
+
             try:
                 return re.compile(pattern, flags)
             except re.error:
-                # If it still fails, return a dummy regex that won't match
                 return re.compile("$^")
-        
+
         try:
             return re.compile(value.replace('(?<', '(?P<'))
         except re.error:
@@ -72,7 +72,6 @@ class WPXData:
         if df_file.exists():
             print("[*] Loading dynamic finders...")
             with open(df_file, "r") as f:
-                # Use safe_load for security
                 data = yaml.safe_load(f)
                 self.dynamic_finders = data.get("plugins", {})
                 print(f"  - Loaded {len(self.dynamic_finders)} plugin detection rules.")
@@ -89,11 +88,21 @@ class WPXData:
             with open(backup_file, "r") as f:
                 self.backups = [line.strip() for line in f if line.strip()]
 
+    def load_wp_metadata(self):
+        meta_file = DATA_DIR / "metadata.json"
+        if meta_file.exists():
+            try:
+                with open(meta_file) as f:
+                    data = json.load(f)
+                self.wp_metadata = data.get("wordpress", {})
+            except Exception:
+                pass
+
     def get_plugin_rules(self, slug):
         return self.dynamic_finders.get(slug, {})
 
+
 if __name__ == "__main__":
-    # Test downloader
     data = WPXData(force_update=False)
     data.download_metadata()
     data.load_dynamic_finders()
