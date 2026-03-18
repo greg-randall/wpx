@@ -24,11 +24,12 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 
-CATALOG_FILE = Path("data/plugins_catalog.json")
-DEAD_CATALOG_FILE = Path("data/plugins_dead.jsonl")
-ACTIVE_SLUGS_FILE = Path("data/plugins_active.txt")
-DEAD_SLUGS_FILE = Path("data/plugins_dead.txt")
-ARCHIVE_CACHE_DIR = Path("data/archive.org-cache")
+DATA_DIR = Path(__file__).parent
+CATALOG_FILE = DATA_DIR / "plugins_catalog.json"
+DEAD_CATALOG_FILE = DATA_DIR / "plugins_dead.jsonl"
+ACTIVE_SLUGS_FILE = DATA_DIR / "plugins_active.txt"
+DEAD_SLUGS_FILE = DATA_DIR / "plugins_dead.txt"
+ARCHIVE_CACHE_DIR = DATA_DIR / "archive.org-cache"
 
 API_BASE = "https://api.wordpress.org/plugins/info/1.2/"
 SVN_BASE = "https://plugins.svn.wordpress.org/"
