@@ -17,8 +17,6 @@ _RAINBOW = [
     "\033[94m",   # bright blue
     "\033[35m",   # magenta
     "\033[95m",   # bright magenta
-    "\033[91m",   # bright red
-    "\033[33m",   # yellow/orange
 ]
 
 _BANNER_LINES = [
@@ -34,11 +32,25 @@ _BANNER_LINES = [
     "                                                 ░ ░     ",
 ]
 
+# How many characters wide each color band is (diagonal step size)
+_BAND = 8
+
 
 def print_banner():
+    """Print the banner with diagonal rainbow stripes (color determined by row+col)."""
     print()
-    for i, line in enumerate(_BANNER_LINES):
-        print(f"{BOLD}{_RAINBOW[i]}{line}{RESET}")
+    n = len(_RAINBOW)
+    for row, line in enumerate(_BANNER_LINES):
+        out = []
+        current_color = None
+        for col, ch in enumerate(line):
+            color = _RAINBOW[(row + col // _BAND) % n]
+            if color != current_color:
+                out.append(f"{BOLD}{color}")
+                current_color = color
+            out.append(ch)
+        out.append(RESET)
+        print("".join(out))
     print(f"\n{CYAN}    WordPress X-Ray Scanner | WAF/Cloudflare Bypass{RESET}\n")
 
 
