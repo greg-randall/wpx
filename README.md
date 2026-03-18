@@ -61,7 +61,8 @@ python3 wpx.py -u https://example.com --plugins-limit 500
 ```
 
 ### Full plugin brute-force
-Scan all available plugin slugs (up to 50,000+ if `plugins_full.txt` exists):
+Scan all available plugin slugs (up to 110,000+ if `data/plugins_full.txt` exists).
+**Warning**: This performs a massive number of requests and can take several hours to complete depending on your thread count and the target's responsiveness.
 ```bash
 python3 wpx.py -u https://example.com --full-scan
 ```
@@ -71,6 +72,14 @@ To update the plugin list and rank by popularity:
 ```bash
 python3 data/wpx_fetch_plugins.py --sort-by score
 ```
+
+## Data management
+
+The `data/` directory contains the processed plugin datasets and maintenance tools:
+
+*   **`data/plugins_full.txt`**: The master list of ~150,000 plugin slugs, ordered by popularity (active) and last-updated date (dead).
+*   **`data/plugins_dead.jsonl`**: An incremental, repo-bundled cache of "dead" or closed plugins including their last known activity date.
+*   **`data/wpx_fetch_plugins.py`**: A hybrid fetcher that combines the WordPress API and SVN repository to keep these lists current.
 
 ## Comparison with WPScan
 
