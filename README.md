@@ -13,6 +13,8 @@
 
 WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudflare and WAF challenges. It mirrors those sessions to perform fast, asynchronous plugin and theme discovery.
 
+**Note**: WPX downloads necessary scan metadata (fingerprints, detection rules) from `data.wpscan.org`.
+
 ## Features
 
 *   **WAF bypass**: Uses Camoufox headless browser to solve challenges and extract session tokens.
@@ -91,6 +93,8 @@ WPX is a Python implementation focused on WAF evasion and speed.
 | `-t, --threads` | Concurrent threads for scanning (Default: 20). |
 | `--plugins-limit` | Limit the number of plugins to scan (e.g. 500, 5000). |
 | `--full-scan` | Scans all available plugin slugs. |
+| `--update` | Force update of WPScan metadata files. |
+
 
 ## Disclaimer
 

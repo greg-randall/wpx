@@ -1,5 +1,6 @@
 import json
 import re
+import time
 import urllib.request
 import yaml
 from pathlib import Path
@@ -15,6 +16,8 @@ FILES = [
     "wp_fingerprints.json",
     "metadata.json",
 ]
+PLUGINS_FULL = Path("plugins_full.txt")
+STALE_DAYS = 30
 
 
 class WPXData:
@@ -54,6 +57,30 @@ class WPXData:
             return re.compile(value.replace('(?<', '(?P<'))
         except re.error:
             return re.compile("$^")
+
+    def get_stale_files(self):
+        """Return list of files older than STALE_DAYS."""
+        stale = []
+        now = time.time()
+        max_age = STALE_DAYS * 24 * 60 * 60
+
+        # Check metadata files from wpscan.org
+        for filename in FILES:
+            local_path = DATA_DIR / filename
+            if local_path.exists():
+                age = now - local_path.stat().st_mtime
+                if age > max_age:
+                    stale.append(str(local_path))
+            else:
+                stale.append(str(local_path))
+
+        # Check plugins_full.txt
+        if PLUGINS_FULL.exists():
+            age = now - PLUGINS_FULL.stat().st_mtime
+            if age > max_age:
+                stale.append(str(PLUGINS_FULL))
+
+        return stale
 
     def download_metadata(self):
         print("[*] Checking for WPScan metadata updates...")

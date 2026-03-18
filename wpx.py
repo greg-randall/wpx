@@ -49,8 +49,19 @@ def main():
                         help="Limit the number of plugins to scan (e.g. 500, 5000)")
     parser.add_argument("--full-scan", action="store_true",
                         help="Scan all available plugin slugs (up to 50k+ if fetched)")
+    parser.add_argument("--update", action="store_true",
+                        help="Force update of WPScan metadata files")
 
     args = parser.parse_args()
+
+    if args.update:
+        print_banner()
+        data = WPXData(force_update=True)
+        data.download_metadata()
+        print_info("Metadata update complete.")
+        print_info("To update the full plugin catalog, run: python3 wpx_fetch_plugins.py")
+        sys.exit(0)
+
     target_url = args.url
     start_time = time.time()
 
@@ -61,6 +72,12 @@ def main():
 
     # 1. Initialize Data
     data = WPXData()
+    stale = data.get_stale_files()
+    if stale:
+        print_warn(f"Some data files are older than 30 days or missing: {', '.join(stale[:3])}...")
+        print_warn("It is recommended to run: python3 wpx.py --update")
+        print()
+
     data.download_metadata()
     data.load_dynamic_finders()
     data.load_slugs()
