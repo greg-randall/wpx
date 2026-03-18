@@ -36,15 +36,19 @@ def _ver_status(plugin_info, api_result):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="WPX - WordPress X-Ray Scanner (Stealth & WAF-Bypass)")
+    parser = argparse.ArgumentParser(
+        description="WPX - WordPress X-Ray Scanner (Stealth & WAF-Bypass)"
+    )
     parser.add_argument("--url", "-u", required=True, help="Target WordPress URL")
     parser.add_argument("--api-key", help="WPScan Vulnerability Database API Key")
     parser.add_argument("--enumerate", "-e", choices=['p', 'vp'], default='p',
                         help="Enumeration type: 'p' (plugins), 'vp' (vulnerable plugins)")
     parser.add_argument("--threads", "-t", type=int, default=20,
                         help="Number of concurrent threads (default: 20)")
+    parser.add_argument("--plugins-limit", type=int,
+                        help="Limit the number of plugins to scan (e.g. 500, 5000)")
     parser.add_argument("--full-scan", action="store_true",
-                        help="Scan all 1500+ plugin slugs instead of top 200")
+                        help="Scan all available plugin slugs (up to 50k+ if fetched)")
 
     args = parser.parse_args()
     target_url = args.url
@@ -97,30 +101,43 @@ def main():
     if data.backups:
         finder.check_config_backups()
 
-    # Active plugin brute-force
-    if args.full_scan:
-        # Check repo-bundled list first, then fall back to .wpx_data/
-        for candidate in [Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
-            if candidate.exists():
-                full_list = candidate
-                break
-        else:
-            full_list = None
-        if full_list:
-            with open(full_list) as f:
-                slugs = [line.strip() for line in f if line.strip()]
-            print_status(f"Full scan: {len(slugs):,} slugs from {full_list} (run wpx_fetch_plugins.py to update)")
-        else:
-            slugs = data.plugins
-            print_status(f"Full scan: {len(slugs):,} slugs (run wpx_fetch_plugins.py to get all ~58k WP.org plugins)")
+    # 4. Active plugin brute-force selection
+    best_source = None
+    for candidate in [Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
+        if candidate.exists():
+            best_source = candidate
+            break
+
+    if best_source:
+        with open(best_source) as f:
+            all_slugs = [line.strip() for line in f if line.strip()]
+        source_name = str(best_source)
     else:
-        slugs = data.plugins[:200]
-    finder.scan_plugins(slugs, threads=args.threads)
+        all_slugs = data.plugins
+        source_name = "WPScan default list"
+
+    if not all_slugs:
+        print_warn("No plugin slugs found. Skipping active enumeration.")
+        slugs = []
+    elif args.full_scan:
+        slugs = all_slugs
+        print_status(f"Full scan: {len(slugs):,} slugs from {source_name}")
+    elif args.plugins_limit:
+        slugs = all_slugs[:args.plugins_limit]
+        print_status(
+            f"Limited scan: {len(slugs):,} slugs (top {args.plugins_limit}) from {source_name}"
+        )
+    else:
+        slugs = all_slugs[:200]
+        print_status(f"Default scan: {len(slugs):,} slugs (top 200) from {source_name}")
+
+    if slugs:
+        finder.scan_plugins(slugs, threads=args.threads)
 
     # Version detection
     finder.detect_versions()
 
-    # 4. Vulnerability API
+    # 5. Vulnerability API
     vuln_api = WPXVulnerability(api_key=args.api_key)
     api_results = {}
     if args.api_key:
@@ -198,7 +215,9 @@ def main():
             ver_label = f"{version} identified ({GREEN}Latest{rd_str}{RESET})"
         elif wv.get("is_latest") is False:
             latest = wv.get("latest_version", "?")
-            ver_label = f"{version} identified ({YELLOW}Outdated, latest: {latest}{RESET})"
+            ver_label = (
+                f"{version} identified ({YELLOW}Outdated, latest: {latest}{RESET})"
+            )
         else:
             ver_label = f"{version} identified"
 
@@ -233,7 +252,9 @@ def main():
         if th.get("confirmed_by"):
             subitems.append(f"Confirmed By: {th['confirmed_by']}")
         if th.get("version"):
-            subitems.append(f"Version: {th['version']} ({th.get('version_confidence', '?')}% confidence)")
+            ver = th.get("version")
+            conf = th.get("version_confidence", "?")
+            subitems.append(f"Version: {ver} ({conf}% confidence)")
             subitems.append(f"Found By: {th['version_found_by']}")
         print_finding(f"WordPress theme in use: {th['slug']}", subitems)
         print()
@@ -276,7 +297,8 @@ def main():
                 subitems.append(f"Confirmed By: {info['confirmed_by']}")
 
             if version != "Unknown" and version_confidence:
-                subitems.append(f"Version: {version} ({version_confidence}% confidence)")
+                label = f"Version: {version} ({version_confidence}% confidence)"
+                subitems.append(label)
                 if version_found_by:
                     subitems.append(f"Found By: {version_found_by}")
                 if version_url:
