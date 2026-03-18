@@ -387,8 +387,11 @@ class WPXFinder:
         headers = dict(self.core.session.headers)
         cookies = dict(self.core.cookies)
         sem = asyncio.Semaphore(concurrency)
+        total = len(slugs)
+        completed = 0
 
         async def check_plugin(session, slug):
+            nonlocal completed
             plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
             async with sem:
                 try:
@@ -400,15 +403,20 @@ class WPXFinder:
                         timeout=10,
                         allow_redirects=False,
                     )
+                    completed += 1
+                    pct = completed / total * 100
+                    print(f"\r[*] Brute-forcing plugins - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
                     if res.status_code in [200, 403]:
                         return slug, res.status_code
                 except Exception:
-                    pass
+                    completed += 1
             return None
 
         async with AsyncSession() as session:
             tasks = [check_plugin(session, slug) for slug in slugs]
-            return await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
+            print()  # newline after progress bar
+            return results
 
     # ------------------------------------------------------------------
     # Version detection
@@ -478,10 +486,14 @@ class WPXFinder:
         cookies = dict(self.core.cookies)
         sem = asyncio.Semaphore(10)
         slugs = list(self.found_plugins.keys())
+        total = len(slugs)
+        completed = 0
 
         async def process_version(session, slug):
+            nonlocal completed
             rules = self.data.get_plugin_rules(slug)
             if not rules:
+                completed += 1
                 return slug, "Unknown", 0, None, None
 
             base_plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
@@ -491,6 +503,9 @@ class WPXFinder:
                 "", {}, rules, slug=slug
             )
             if version != "Unknown":
+                completed += 1
+                pct = completed / total * 100
+                print(f"\r[*] Detecting versions - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
                 return slug, version, confidence, found_by, source_url
 
             # 2. Readme — fetch and extract "Stable tag:"
@@ -510,6 +525,9 @@ class WPXFinder:
                             impersonate="firefox",
                             timeout=10,
                         )
+                        completed += 1
+                        pct = completed / total * 100
+                        print(f"\r[*] Detecting versions - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
                         if res.status_code == 200:
                             stable = re.search(
                                 r'Stable tag:\s*([\d.]+)', res.text, re.IGNORECASE
@@ -519,12 +537,18 @@ class WPXFinder:
                                         "Readme - Stable Tag (Aggressive Detection)", readme_url)
                     except Exception:
                         pass
+            else:
+                completed += 1
+                pct = completed / total * 100
+                print(f"\r[*] Detecting versions - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
 
             return slug, "Unknown", 0, None, None
 
         async with AsyncSession() as session:
             tasks = [process_version(session, slug) for slug in slugs]
-            return await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
+            print()  # newline after progress bar
+            return results
 
 
 if __name__ == "__main__":
