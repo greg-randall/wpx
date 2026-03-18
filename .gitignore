@@ -1,0 +1,4 @@
+.wpx_data/*
+*.md
+!README.md
+__pycache__/*
