@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Fetch the full WordPress.org plugin catalog and save to .wpx_data/.
+Fetch the full WordPress.org plugin catalog and save to data/.
 
 Outputs:
-  .wpx_data/plugins_catalog.json  — slug → metadata (active_installs, downloads, rating…)
-  plugins_dead.jsonl              — repo-bundled cache for dead plugin metadata
-  plugins_full.txt                — all slugs (active sorted by popularity, dead by last_updated)
+  data/plugins_catalog.json     — slug → metadata (active_installs, downloads, rating…)
+  data/plugins_dead.jsonl       — cache for dead plugin metadata (append-only, last-write-wins)
+  data/plugins_active.txt       — active slugs sorted by popularity (top --active-limit)
+  data/plugins_dead.txt         — dead slugs sorted by install count (top --dead-limit)
+  data/archive.org-cache/       — raw HTML snapshots used for dead plugin enrichment
 
 Usage:
-  python3 wpx_fetch_plugins.py [--sort-by active_installs|downloaded|rating]
+  python3 data/wpx_fetch_plugins.py [--sort-by active_installs|downloaded|score]
+                                    [--active-limit N] [--dead-limit N]
 """
 import argparse
 import asyncio
@@ -21,16 +24,19 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 
-DATA_DIR = Path(".wpx_data")
 CATALOG_FILE = Path("data/plugins_catalog.json")
 DEAD_CATALOG_FILE = Path("data/plugins_dead.jsonl")
-SLUGS_FILE = Path("data/plugins_full.txt")
+ACTIVE_SLUGS_FILE = Path("data/plugins_active.txt")
+DEAD_SLUGS_FILE = Path("data/plugins_dead.txt")
+ARCHIVE_CACHE_DIR = Path("data/archive.org-cache")
 
 API_BASE = "https://api.wordpress.org/plugins/info/1.2/"
 SVN_BASE = "https://plugins.svn.wordpress.org/"
+WAYBACK_AVAIL_API = "https://archive.org/wayback/available"
 PER_PAGE = 250
 CHECKPOINT_EVERY = 25
 POLITE_DELAY = 0.15
+ARCHIVE_DELAY = 0.5
 
 # Global adaptive rate limiting for SVN
 svn_delay = 0.0
@@ -103,10 +109,8 @@ def fetch_svn_slugs():
     try:
         req = urllib.request.Request(SVN_BASE, headers={"User-Agent": "WPX-Plugin-Fetcher/1.0"})
         with urllib.request.urlopen(req, timeout=60) as resp:
-            # Stream the response to avoid huge memory usage
             for line in resp:
                 line_str = line.decode('utf-8', errors='ignore')
-                # Pattern for <a href="slug/">slug/</a>
                 matches = re.findall(r'href="([^/"]+)/"', line_str)
                 for slug in matches:
                     if slug != "..":
@@ -117,17 +121,39 @@ def fetch_svn_slugs():
 
 
 def load_dead_catalog():
+    """Load dead plugin records from JSONL. Last entry wins for duplicate slugs."""
     catalog = {}
     if DEAD_CATALOG_FILE.exists():
         with open(DEAD_CATALOG_FILE, "r") as f:
             for line in f:
                 try:
                     data = json.loads(line.strip())
-                    if "slug" in data and "last_updated" in data:
-                        catalog[data["slug"]] = data["last_updated"]
+                    if "slug" in data:
+                        existing = catalog.get(data["slug"], {})
+                        catalog[data["slug"]] = {**existing, **data}
                 except Exception:
                     continue
     return catalog
+
+
+def seed_from_catalog(newly_dead, old_catalog):
+    """
+    Write dead JSONL entries for slugs we already have API data for.
+    Returns the set of slugs that were seeded (no Archive.org needed for these).
+    """
+    seeded = set()
+    for slug in newly_dead:
+        if slug not in old_catalog:
+            continue
+        record = {
+            "slug": slug,
+            "last_updated": old_catalog[slug].get("last_updated", ""),
+            "active_installs": old_catalog[slug].get("active_installs", 0),
+        }
+        with open(DEAD_CATALOG_FILE, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        seeded.add(slug)
+    return seeded
 
 
 async def fetch_dead_metadata(slugs_to_fetch):
@@ -137,7 +163,7 @@ async def fetch_dead_metadata(slugs_to_fetch):
     if not slugs_to_fetch:
         return
 
-    print(f"[*] Fetching metadata for {len(slugs_to_fetch):,} new dead plugins...")
+    print(f"[*] Fetching SVN metadata for {len(slugs_to_fetch):,} new dead plugins...")
     sem = asyncio.Semaphore(10)
     total = len(slugs_to_fetch)
     completed = 0
@@ -153,28 +179,25 @@ async def fetch_dead_metadata(slugs_to_fetch):
                     await asyncio.sleep(svn_delay)
 
                 try:
-                    # Use HEAD to get Last-Modified without body
                     res = await session.head(url, timeout=15, impersonate="firefox")
 
                     if res.status_code == 200:
                         last_mod = res.headers.get("Last-Modified", "")
-                        # Reduce delay slightly on success if we were backing off
                         if svn_backoff_active:
                             svn_delay = max(0.1, svn_delay * 0.9)
-                        
+
                         completed += 1
                         if completed % 10 == 0 or completed == total:
                             pct = completed / total * 100
-                            print(f"\r[*] Graveyard progress: {completed}/{total} ({pct:.1f}%) — delay: {svn_delay:.2f}s", end="", flush=True)
+                            msg = f"\r[*] Graveyard: {completed}/{total} ({pct:.1f}%) — delay: {svn_delay:.2f}s"
+                            print(msg, end="", flush=True)
 
                         result = {"slug": slug, "last_updated": last_mod}
-                        # Append to JSONL immediately
                         with open(DEAD_CATALOG_FILE, "a") as f:
                             f.write(json.dumps(result) + "\n")
                         return result
 
                     elif res.status_code in [429, 404, 403]:
-                        # 404/403 often mean block on SVN
                         print(f"\n[!] Throttled ({res.status_code}) on {slug}. Cooling down 60s...")
                         svn_backoff_active = True
                         if svn_delay == 0:
@@ -182,14 +205,13 @@ async def fetch_dead_metadata(slugs_to_fetch):
                         else:
                             svn_delay = min(30, svn_delay * 2)
                         await asyncio.sleep(60)
-                        continue # Retry this slug
+                        continue
 
                     else:
                         completed += 1
                         return None
 
-                except Exception as e:
-                    # Network error, retry
+                except Exception:
                     await asyncio.sleep(5)
                     continue
 
@@ -197,6 +219,129 @@ async def fetch_dead_metadata(slugs_to_fetch):
         tasks = [fetch_one(session, slug) for slug in slugs_to_fetch]
         await asyncio.gather(*tasks)
     print()
+
+
+def parse_svn_date_to_cdx(date_str):
+    """Convert 'Wed, 03 Feb 2016 14:24:48 GMT' to CDX timestamp '20160203142448'."""
+    if not date_str:
+        return None
+    try:
+        dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %Z")
+        return dt.strftime("%Y%m%d%H%M%S")
+    except Exception:
+        return None
+
+
+def parse_active_installs(html):
+    """Extract active install count from a wordpress.org plugin page snapshot."""
+    html_lower = html.lower()
+
+    m = re.search(r'([\d.]+)\s*million\+?\s*active\s*install', html_lower)
+    if m:
+        return int(float(m.group(1)) * 1_000_000)
+
+    m = re.search(r'less than\s+([\d,]+)\s*active\s*install', html_lower)
+    if m:
+        return 0
+
+    m = re.search(r'([\d,]+)\+?\s*active\s*install', html_lower)
+    if m:
+        return int(m.group(1).replace(',', ''))
+
+    return None
+
+
+async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
+    """
+    Fetch historical active_installs from Archive.org for dead plugins.
+
+    Uses the SVN Last-Modified date as a ceiling so we get the most recent
+    snapshot while the plugin was still active in the directory. Caches raw
+    HTML in ARCHIVE_CACHE_DIR so subsequent runs skip network requests.
+    Enriched records are appended to DEAD_CATALOG_FILE (last-write-wins on load).
+    """
+    from curl_cffi.requests import AsyncSession
+
+    if not slugs_to_enrich:
+        return
+
+    ARCHIVE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    total = len(slugs_to_enrich)
+    completed = 0
+    enriched = 0
+
+    _last_req = [0.0]
+    _req_lock = asyncio.Lock()
+
+    async def rate_limited_get(session, url):
+        async with _req_lock:
+            elapsed = time.time() - _last_req[0]
+            if elapsed < ARCHIVE_DELAY:
+                await asyncio.sleep(ARCHIVE_DELAY - elapsed)
+            _last_req[0] = time.time()
+        return await session.get(url, timeout=30, impersonate="firefox")
+
+    async def enrich_one(session, slug):
+        nonlocal completed, enriched
+
+        slug_data = dead_catalog.get(slug, {})
+        last_updated = slug_data.get("last_updated", "") if isinstance(slug_data, dict) else ""
+        cache_file = ARCHIVE_CACHE_DIR / f"{slug}.html"
+
+        html = None
+
+        if cache_file.exists():
+            html = cache_file.read_text(encoding='utf-8', errors='ignore')
+        else:
+            cdx_ts = parse_svn_date_to_cdx(last_updated)
+            avail_url = (
+                f"{WAYBACK_AVAIL_API}"
+                f"?url=wordpress.org/plugins/{slug}/"
+                f"&timestamp={cdx_ts or ''}"
+            )
+            try:
+                resp = await rate_limited_get(session, avail_url)
+                if resp.status_code != 200:
+                    completed += 1
+                    return
+
+                data = resp.json()
+                closest = data.get("archived_snapshots", {}).get("closest", {})
+
+                if not closest.get("available") or closest.get("status") != "200":
+                    completed += 1
+                    return
+
+                resp2 = await rate_limited_get(session, closest["url"])
+                if resp2.status_code != 200:
+                    completed += 1
+                    return
+
+                html = resp2.text
+                cache_file.write_text(html, encoding='utf-8')
+
+            except Exception:
+                completed += 1
+                return
+
+        installs = parse_active_installs(html) if html else None
+
+        completed += 1
+        if completed % 100 == 0 or completed == total:
+            pct = completed / total * 100
+            print(f"\r[*] Archive: {completed}/{total} ({pct:.1f}%) — {enriched} enriched", end="", flush=True)
+
+        if installs is not None:
+            enriched += 1
+            record = {**slug_data, "slug": slug, "active_installs": installs}
+            with open(DEAD_CATALOG_FILE, "a") as f:
+                f.write(json.dumps(record) + "\n")
+
+    async with AsyncSession() as session:
+        await asyncio.gather(*[enrich_one(session, slug) for slug in slugs_to_enrich])
+
+    print(f"\n[+] Archive enrichment complete: {enriched:,}/{total:,} plugins enriched")
 
 
 def main():
@@ -213,11 +358,25 @@ def main():
         help="Re-fetch everything even if catalog already exists",
     )
     parser.add_argument(
-        "--limit",
+        "--fetch-limit",
         type=int,
         default=0,
         metavar="N",
-        help="Stop after fetching N active plugins (0 = all)",
+        help="Stop after fetching N active plugins from API (0 = all)",
+    )
+    parser.add_argument(
+        "--active-limit",
+        type=int,
+        default=5000,
+        metavar="N",
+        help="How many active slugs to write to plugins_active.txt (0 = all, default: 5000)",
+    )
+    parser.add_argument(
+        "--dead-limit",
+        type=int,
+        default=2500,
+        metavar="N",
+        help="How many dead slugs to write to plugins_dead.txt (0 = all, default: 2500)",
     )
     parser.add_argument(
         "--debug",
@@ -226,16 +385,17 @@ def main():
     )
     args = parser.parse_args()
 
-    DATA_DIR.mkdir(exist_ok=True)
-
-    # 1. Load Active Catalog
-    catalog = {}
-    if CATALOG_FILE.exists() and not args.force:
+    # 1. Load previous catalog before overwriting — used to seed newly-dead plugins
+    old_catalog = {}
+    if CATALOG_FILE.exists():
         with open(CATALOG_FILE) as f:
-            catalog = json.load(f)
-        print(f"[*] Loaded active catalog: {len(catalog)} plugins.")
+            old_catalog = json.load(f)
+        if not args.force:
+            print(f"[*] Loaded previous catalog: {len(old_catalog):,} plugins.")
 
     # 2. Fetch Active Plugins from API
+    catalog = {} if args.force else dict(old_catalog)
+
     print("[*] Fetching page 1...")
     try:
         first = fetch_page(1)
@@ -250,18 +410,18 @@ def main():
     for p in first["plugins"]:
         catalog[p["slug"]] = extract(p)
 
-    def _limit_reached():
-        return args.limit > 0 and len(catalog) >= args.limit
+    def _fetch_limit_reached():
+        return args.fetch_limit > 0 and len(catalog) >= args.fetch_limit
 
     for page in range(2, total_pages + 1):
-        if _limit_reached():
+        if _fetch_limit_reached():
             break
         print(f"\r[*] API Page {page}/{total_pages} — {len(catalog):,} plugins", end="", flush=True)
         try:
             data = fetch_page(page)
             for p in data.get("plugins", []):
                 catalog[p["slug"]] = extract(p)
-                if _limit_reached():
+                if _fetch_limit_reached():
                     break
         except Exception as e:
             print(f"\n[!] Page {page} failed: {e}")
@@ -286,20 +446,36 @@ def main():
     newly_dead = list(dead_slugs_all - set(dead_catalog.keys()))
 
     if newly_dead:
-        asyncio.run(fetch_dead_metadata(newly_dead))
-        # Reload to get the new results
+        # Seed from previous catalog first — no network needed for recently-closed plugins
+        seeded = seed_from_catalog(newly_dead, old_catalog)
+        if seeded:
+            print(f"[+] Seeded {len(seeded):,} newly-dead plugins from previous catalog")
+
+        # Fetch SVN Last-Modified for the rest
+        needs_svn = [s for s in newly_dead if s not in seeded]
+        if needs_svn:
+            asyncio.run(fetch_dead_metadata(needs_svn))
+
         dead_catalog = load_dead_catalog()
 
-    # 5. Build Final Sorted List
-    print("[*] Sorting and building final slug list...")
-    
-    # Sort active by popularity
+    # 5. Enrich with Archive.org — only for slugs missing active_installs
+    needs_enrichment = [
+        s for s in dead_slugs_all
+        if s in dead_catalog and dead_catalog[s].get("active_installs") is None
+    ]
+    if needs_enrichment:
+        print(f"[*] {len(needs_enrichment):,} dead plugins need Archive.org enrichment")
+        asyncio.run(enrich_dead_with_archive(needs_enrichment, dead_catalog))
+        dead_catalog = load_dead_catalog()
+
+    # 6. Build and write sorted lists
+    print("[*] Sorting and building plugin lists...")
+
     sort_fn = SORT_KEYS[args.sort_by]
     sorted_active = sorted(catalog, key=lambda s: sort_fn(catalog[s]), reverse=True)
-    
-    # Sort dead by last updated (newest first)
-    # Parse dates for sorting: "Wed, 03 Feb 2016 14:24:48 GMT"
-    def parse_svn_date(date_str):
+
+    def svn_date_ts(slug):
+        date_str = dead_catalog.get(slug, {}).get("last_updated", "")
         if not date_str:
             return 0
         try:
@@ -307,25 +483,38 @@ def main():
         except Exception:
             return 0
 
-    sorted_dead = sorted(
-        [s for s in dead_slugs_all if s in dead_catalog],
-        key=lambda s: parse_svn_date(dead_catalog[s]),
-        reverse=True
+    dead_with_installs = sorted(
+        [s for s in dead_slugs_all if dead_catalog.get(s, {}).get("active_installs") is not None],
+        key=lambda s: dead_catalog[s]["active_installs"],
+        reverse=True,
     )
-    
-    # Any dead plugins we failed to get dates for (alphabetical)
+    dead_without_installs = sorted(
+        [s for s in dead_slugs_all
+         if s in dead_catalog and dead_catalog[s].get("active_installs") is None],
+        key=svn_date_ts,
+        reverse=True,
+    )
     undated_dead = sorted(list(dead_slugs_all - set(dead_catalog.keys())))
 
-    final_list = sorted_active + sorted_dead + undated_dead
-    
-    with open(SLUGS_FILE, "w") as f:
-        f.write("\n".join(final_list) + "\n")
-    
-    print(f"[+] Final list saved → {SLUGS_FILE}")
-    print(f"    - {len(sorted_active):,} active (sorted by {args.sort_by})")
-    print(f"    - {len(sorted_dead):,} closed/dead (sorted by last updated)")
-    print(f"    - {len(undated_dead):,} undated dead")
-    print(f"    - Total: {len(final_list):,} slugs")
+    sorted_dead = dead_with_installs + dead_without_installs + undated_dead
+
+    active_out = sorted_active if args.active_limit == 0 else sorted_active[:args.active_limit]
+    dead_out = sorted_dead if args.dead_limit == 0 else sorted_dead[:args.dead_limit]
+
+    with open(ACTIVE_SLUGS_FILE, "w") as f:
+        f.write("\n".join(active_out) + "\n")
+
+    with open(DEAD_SLUGS_FILE, "w") as f:
+        f.write("\n".join(dead_out) + "\n")
+
+    # Stats
+    dead_from_catalog = sum(1 for s in dead_out if dead_catalog.get(s, {}).get("active_installs") is not None)
+    print(f"[+] {ACTIVE_SLUGS_FILE} — {len(active_out):,} active plugins (sorted by {args.sort_by})")
+    print(f"[+] {DEAD_SLUGS_FILE} — {len(dead_out):,} dead plugins")
+    print(f"    - {len(dead_with_installs):,} total with known installs "
+          f"({dead_from_catalog:,} in output, sorted by popularity)")
+    print(f"    - {len(dead_without_installs):,} installs unknown (sorted by last updated)")
+    print(f"    - {len(undated_dead):,} no data at all")
 
 
 if __name__ == "__main__":
