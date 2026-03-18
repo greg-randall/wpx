@@ -96,63 +96,68 @@ def main():
     # 3. Discovery Engine
     finder = WPXFinder(core, data)
 
-    # Homepage
-    homepage_res = core.session.get(target_url, impersonate="firefox")
+    try:
+        # Homepage
+        homepage_res = core.session.get(target_url, impersonate="firefox")
 
-    # Headers
-    finder.check_headers(homepage_res)
+        # Headers
+        finder.check_headers(homepage_res)
 
-    # WP version
-    finder.detect_wp_version(homepage_res.text, target_url)
+        # WP version
+        finder.detect_wp_version(homepage_res.text, target_url)
 
-    # Core files (robots.txt, xmlrpc, wp-cron, readme)
-    finder.check_core_files()
+        # Core files (robots.txt, xmlrpc, wp-cron, readme)
+        finder.check_core_files()
 
-    # Passive plugin/theme discovery
-    finder.find_passive_items(homepage_res.text)
+        # Passive plugin/theme discovery
+        finder.find_passive_items(homepage_res.text)
 
-    # Theme details
-    finder.detect_theme_details()
+        # Theme details
+        finder.detect_theme_details()
 
-    # Config backups
-    if data.backups:
-        finder.check_config_backups()
+        # Config backups
+        if data.backups:
+            finder.check_config_backups()
 
-    # 4. Active plugin brute-force selection
-    best_source = None
-    for candidate in [Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
-        if candidate.exists():
-            best_source = candidate
-            break
+        # 4. Active plugin brute-force selection
+        best_source = None
+        for candidate in [Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
+            if candidate.exists():
+                best_source = candidate
+                break
 
-    if best_source:
-        with open(best_source) as f:
-            all_slugs = [line.strip() for line in f if line.strip()]
-        source_name = str(best_source)
-    else:
-        all_slugs = data.plugins
-        source_name = "WPScan default list"
+        if best_source:
+            with open(best_source) as f:
+                all_slugs = [line.strip() for line in f if line.strip()]
+            source_name = str(best_source)
+        else:
+            all_slugs = data.plugins
+            source_name = "WPScan default list"
 
-    if not all_slugs:
-        print_warn("No plugin slugs found. Skipping active enumeration.")
-        slugs = []
-    elif args.full_scan:
-        slugs = all_slugs
-        print_status(f"Full scan: {len(slugs):,} slugs from {source_name}")
-    elif args.plugins_limit:
-        slugs = all_slugs[:args.plugins_limit]
-        print_status(
-            f"Limited scan: {len(slugs):,} slugs (top {args.plugins_limit}) from {source_name}"
-        )
-    else:
-        slugs = all_slugs[:200]
-        print_status(f"Default scan: {len(slugs):,} slugs (top 200) from {source_name}")
+        if not all_slugs:
+            print_warn("No plugin slugs found. Skipping active enumeration.")
+            slugs = []
+        elif args.full_scan:
+            slugs = all_slugs
+            print_status(f"Full scan: {len(slugs):,} slugs from {source_name}")
+        elif args.plugins_limit:
+            slugs = all_slugs[:args.plugins_limit]
+            print_status(
+                f"Limited scan: {len(slugs):,} slugs (top {args.plugins_limit}) from {source_name}"
+            )
+        else:
+            slugs = all_slugs[:200]
+            print_status(f"Default scan: {len(slugs):,} slugs (top 200) from {source_name}")
 
-    if slugs:
-        finder.scan_plugins(slugs, threads=args.threads)
+        if slugs:
+            finder.scan_plugins(slugs, threads=args.threads)
 
-    # Version detection
-    finder.detect_versions()
+        # Version detection
+        finder.detect_versions()
+
+    except KeyboardInterrupt:
+        print()
+        print_warn("Scan interrupted by user (Ctrl+C). Showing partial results...")
 
     # 5. Vulnerability API
     vuln_api = WPXVulnerability(api_key=args.api_key)
