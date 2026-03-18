@@ -64,17 +64,22 @@ class WPXFinder:
             url = f"{base}/{filename}"
             try:
                 res = self.core.session.get(url, impersonate="firefox", timeout=10)
+
+                if filename == "xmlrpc.php":
+                    # WordPress returns 405 for GET requests; both 200 and 405 confirm existence
+                    if res.status_code in (200, 405):
+                        result["xmlrpc"] = {
+                            "url": url,
+                            "references": XMLRPC_REFERENCES,
+                            "confidence": 100,
+                            "found_by": "Direct Access (Aggressive Detection)",
+                        }
+                    continue
+
                 if res.status_code != 200:
                     continue
 
-                if filename == "xmlrpc.php":
-                    result["xmlrpc"] = {
-                        "url": url,
-                        "references": XMLRPC_REFERENCES,
-                        "confidence": 100,
-                        "found_by": "Direct Access (Aggressive Detection)",
-                    }
-                elif filename == "readme.html":
+                if filename == "readme.html":
                     result["readme"] = {
                         "url": url,
                         "confidence": 100,
@@ -88,11 +93,17 @@ class WPXFinder:
                         "found_by": "Direct Access (Aggressive Detection)",
                     }
                 elif filename == "robots.txt":
-                    entries = [
-                        line.strip()
-                        for line in res.text.splitlines()
-                        if line.strip().startswith("Disallow:") or line.strip().startswith("Allow:")
-                    ]
+                    entries = []
+                    for line in res.text.splitlines():
+                        s = line.strip()
+                        if s.startswith("Disallow:"):
+                            path = s[len("Disallow:"):].strip()
+                            if path:
+                                entries.append(path)
+                        elif s.startswith("Allow:"):
+                            path = s[len("Allow:"):].strip()
+                            if path:
+                                entries.append(path)
                     result["robots_txt"] = {
                         "url": url,
                         "entries": entries,
@@ -291,6 +302,18 @@ class WPXFinder:
         total = len(backups)
         found = []
 
+        # Fetch a known-nonexistent path to detect soft-404 content length
+        baseline_len = None
+        try:
+            canary = self.core.session.get(
+                f"{base}/wp-config-THIS-DOES-NOT-EXIST-xyz123.bak",
+                impersonate="firefox", timeout=10, allow_redirects=False,
+            )
+            if canary.status_code == 200:
+                baseline_len = len(canary.content)
+        except Exception:
+            pass
+
         for i, path in enumerate(backups):
             url = f"{base}/{path}"
             pct = (i + 1) / total * 100
@@ -298,6 +321,11 @@ class WPXFinder:
             try:
                 res = self.core.session.get(url, impersonate="firefox", timeout=10, allow_redirects=False)
                 if res.status_code == 200:
+                    # Reject responses that match the soft-404 baseline (within 5%)
+                    if baseline_len is not None:
+                        body_len = len(res.content)
+                        if body_len > 0 and abs(body_len - baseline_len) / baseline_len < 0.05:
+                            continue
                     found.append(url)
             except Exception:
                 pass
