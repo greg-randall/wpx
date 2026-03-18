@@ -9,9 +9,9 @@
 #     ░                 ░    ░     ░           ░  ░░ ░     
 #                                                  ░ ░     
 
-# WPX: WordPress scanner with WAF bypass
+# WPX: WordPress X-Ray scanner with WAF bypass
 
-WPX is a WordPress security scanner. It uses Camoufox to solve Cloudflare and WAF challenges, then mirrors those sessions to perform asynchronous plugin and theme discovery.
+WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudflare and WAF challenges. It mirrors those sessions to perform fast, asynchronous plugin and theme discovery.
 
 ## Features
 
