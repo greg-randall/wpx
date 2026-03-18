@@ -69,7 +69,7 @@ python3 wpx.py -u https://example.com --full-scan
 ### Refresh plugin data
 To update the plugin list and rank by popularity:
 ```bash
-python3 wpx_fetch_plugins.py --sort-by score
+python3 data/wpx_fetch_plugins.py --sort-by score
 ```
 
 ## Comparison with WPScan

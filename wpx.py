@@ -121,7 +121,7 @@ def main():
 
         # 4. Active plugin brute-force selection
         best_source = None
-        for candidate in [Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
+        for candidate in [Path("data/plugins_full.txt"), Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
             if candidate.exists():
                 best_source = candidate
                 break

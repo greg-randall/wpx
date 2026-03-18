@@ -16,7 +16,7 @@ FILES = [
     "wp_fingerprints.json",
     "metadata.json",
 ]
-PLUGINS_FULL = Path("plugins_full.txt")
+PLUGINS_FULL = Path("data/plugins_full.txt")
 STALE_DAYS = 30
 
 
