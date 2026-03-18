@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import json
+import math
 import sys
 import time
 import urllib.request
@@ -29,10 +30,9 @@ CHECKPOINT_EVERY = 25   # save catalog to disk every N pages
 POLITE_DELAY = 0.15     # seconds between requests
 
 SORT_KEYS = {
+    "score": lambda p: math.sqrt(p["active_installs"] * p["downloaded"]),
     "active_installs": lambda p: p["active_installs"],
     "downloaded": lambda p: p["downloaded"],
-    # composite: rating × active_installs (favours popular AND well-rated plugins)
-    "score": lambda p: p["rating"] * p["active_installs"],
 }
 
 
@@ -95,8 +95,8 @@ def main():
     parser.add_argument(
         "--sort-by",
         choices=list(SORT_KEYS),
-        default="active_installs",
-        help="How to rank plugins in plugins_full.txt (default: active_installs)",
+        default="score",
+        help="How to rank plugins in plugins_full.txt (default: score = sqrt(active_installs × downloaded))",
     )
     parser.add_argument(
         "--force",
