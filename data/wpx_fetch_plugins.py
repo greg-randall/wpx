@@ -233,25 +233,51 @@ def parse_svn_date_to_cdx(date_str):
         return None
 
 
-def parse_active_installs(html):
-    """Extract active install count from a wordpress.org plugin page snapshot."""
+def parse_plugin_stats(html):
+    """
+    Extract popularity stats from a wordpress.org plugin page snapshot.
+
+    Returns a dict with any of:
+      active_installs — from the "X+ active installations" stat (modern pages)
+      downloaded      — from the UserDownloads meta tag (older pages)
+    Empty dict if nothing is found.
+    """
+    result = {}
     html_lower = html.lower()
 
+    # --- active installs (modern pages) ---
     m = re.search(r'([\d.]+)\s*million\+?\s*active\s*install', html_lower)
     if m:
-        return int(float(m.group(1)) * 1_000_000)
+        result["active_installs"] = int(float(m.group(1)) * 1_000_000)
 
-    m = re.search(r'less than\s+([\d,]+)\s*active\s*install', html_lower)
-    if m:
-        return 0
+    if "active_installs" not in result:
+        # "less than 10 active installations" or "fewer than 10 active installations"
+        m = re.search(r'(?:less|fewer) than\s+[\d,]+\s*active\s*install', html_lower)
+        if m:
+            result["active_installs"] = 0
 
-    m = re.search(r'(\d[\d,]*)\+?\s*active\s*install', html_lower)
-    if m:
-        val = m.group(1).replace(',', '')
-        if val:
-            return int(val)
+    if "active_installs" not in result:
+        # "Active installations <strong>Fewer than 10</strong>" (older layout)
+        m = re.search(r'active\s*installations?\s*(?:<[^>]+>)*(?:fewer|less) than', html_lower)
+        if m:
+            result["active_installs"] = 0
 
-    return None
+    if "active_installs" not in result:
+        m = re.search(r'(\d[\d,]*)\+?\s*active\s*install', html_lower)
+        if m:
+            val = m.group(1).replace(',', '')
+            if val:
+                result["active_installs"] = int(val)
+
+    # --- download count fallback (older pages: UserDownloads meta tag) ---
+    if "active_installs" not in result:
+        m = re.search(r'userdownloads:(\d[\d,]*)', html_lower)
+        if m:
+            val = m.group(1).replace(',', '')
+            if val:
+                result["downloaded"] = int(val)
+
+    return result
 
 
 async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
@@ -336,7 +362,7 @@ async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
                     completed += 1
                     return
 
-            installs = parse_active_installs(html) if html else None
+            stats = parse_plugin_stats(html) if html else {}
 
             completed += 1
             if completed % 25 == 0 or completed == total:
@@ -344,9 +370,9 @@ async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
                 print(f"\r[*] Archive: {completed}/{total} ({pct:.1f}%) — {enriched} enriched",
                       end="", flush=True)
 
-            if installs is not None:
+            if stats:
                 enriched += 1
-                record = {**slug_data, "slug": slug, "active_installs": installs}
+                record = {**slug_data, "slug": slug, **stats}
                 with open(DEAD_CATALOG_FILE, "a") as f:
                     f.write(json.dumps(record) + "\n")
 
@@ -492,10 +518,12 @@ def main():
 
         dead_catalog = load_dead_catalog()
 
-    # 5. Enrich with Archive.org — only for slugs missing active_installs
+    # 5. Enrich with Archive.org — only for slugs missing both popularity metrics
     needs_enrichment = [
         s for s in dead_slugs_all
-        if s in dead_catalog and dead_catalog[s].get("active_installs") is None
+        if s in dead_catalog
+        and dead_catalog[s].get("active_installs") is None
+        and dead_catalog[s].get("downloaded") is None
     ]
     if needs_enrichment:
         print(f"[*] {len(needs_enrichment):,} dead plugins need Archive.org enrichment")
@@ -522,15 +550,24 @@ def main():
         key=lambda s: dead_catalog[s]["active_installs"],
         reverse=True,
     )
+    dead_with_downloads = sorted(
+        [s for s in dead_slugs_all
+         if dead_catalog.get(s, {}).get("active_installs") is None
+         and dead_catalog.get(s, {}).get("downloaded") is not None],
+        key=lambda s: dead_catalog[s]["downloaded"],
+        reverse=True,
+    )
     dead_without_installs = sorted(
         [s for s in dead_slugs_all
-         if s in dead_catalog and dead_catalog[s].get("active_installs") is None],
+         if s in dead_catalog
+         and dead_catalog[s].get("active_installs") is None
+         and dead_catalog[s].get("downloaded") is None],
         key=svn_date_ts,
         reverse=True,
     )
     undated_dead = sorted(list(dead_slugs_all - set(dead_catalog.keys())))
 
-    sorted_dead = dead_with_installs + dead_without_installs + undated_dead
+    sorted_dead = dead_with_installs + dead_with_downloads + dead_without_installs + undated_dead
 
     active_out = sorted_active if args.active_limit == 0 else sorted_active[:args.active_limit]
     dead_out = sorted_dead if args.dead_limit == 0 else sorted_dead[:args.dead_limit]
