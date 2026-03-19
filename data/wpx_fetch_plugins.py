@@ -24,6 +24,8 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 
+from bs4 import BeautifulSoup
+
 DATA_DIR = Path(__file__).parent
 CATALOG_FILE = DATA_DIR / "plugins_catalog.json"
 DEAD_CATALOG_FILE = DATA_DIR / "plugins_dead.jsonl"
@@ -243,48 +245,48 @@ def parse_plugin_stats(html):
     Empty dict if nothing is found.
     """
     result = {}
-    html_lower = html.lower()
+    soup = BeautifulSoup(html, 'lxml')
 
-    # --- active installs (modern pages) ---
-    m = re.search(r'([\d.]+)\s*million\+?\s*active\s*install', html_lower)
+    # Collapse all markup to plain text — handles every layout variant without
+    # caring whether the number is before or after the label, or what tags wrap it.
+    text = soup.get_text(' ', strip=True).lower()
+
+    # "1 million+ active installations"
+    m = re.search(r'([\d.]+)\s*million\+?\s*active\s*install', text)
     if m:
         result["active_installs"] = int(float(m.group(1)) * 1_000_000)
 
+    # "fewer/less than 10 active installations"  OR  "active installations fewer than 10"
     if "active_installs" not in result:
-        # "less than 10 active installations" or "fewer than 10 active installations"
-        m = re.search(r'(?:less|fewer) than\s+[\d,]+\s*active\s*install', html_lower)
+        m = re.search(r'(?:fewer|less) than\s+[\d,]+\s*active\s*install', text)
+        if m:
+            result["active_installs"] = 0
+    if "active_installs" not in result:
+        m = re.search(r'active\s*installations?\s+(?:fewer|less) than', text)
         if m:
             result["active_installs"] = 0
 
+    # "active installs: 5,000+"  or  "5,000+ active installations"
     if "active_installs" not in result:
-        # "Active installations <strong>Fewer than 10</strong>" (older layout)
-        m = re.search(r'active\s*installations?\s*(?:<[^>]+>)*(?:fewer|less) than', html_lower)
+        m = re.search(r'active\s*installs?:?\s*(\d[\d,]*)', text)
         if m:
-            result["active_installs"] = 0
-
+            val = m.group(1).replace(',', '')
+            if val:
+                result["active_installs"] = int(val)
     if "active_installs" not in result:
-        # "Active Installs:</strong> <meta ...> 5,000+" — label before number, tags in between
-        m = re.search(r'active\s*installs?:\s*(?:<[^>]+>\s*)*(\d[\d,]*)', html_lower)
+        m = re.search(r'(\d[\d,]*)\+?\s*active\s*install', text)
         if m:
             val = m.group(1).replace(',', '')
             if val:
                 result["active_installs"] = int(val)
 
+    # Fallback: UserDownloads meta tag (older pages that predate the installs stat)
     if "active_installs" not in result:
-        # "10,000+ active installations" — number before label (modern layout)
-        m = re.search(r'(\d[\d,]*)\+?\s*active\s*install', html_lower)
-        if m:
-            val = m.group(1).replace(',', '')
-            if val:
-                result["active_installs"] = int(val)
-
-    # --- download count fallback (old pages without active installs stat) ---
-    if "active_installs" not in result:
-        m = re.search(r'userdownloads:(\d[\d,]*)', html_lower)
-        if m:
-            val = m.group(1).replace(',', '')
-            if val:
-                result["downloaded"] = int(val)
+        meta = soup.find('meta', attrs={'itemprop': 'interactionCount'})
+        if meta:
+            m = re.match(r'UserDownloads:(\d+)', meta.get('content', ''))
+            if m:
+                result["downloaded"] = int(m.group(1))
 
     return result
 
