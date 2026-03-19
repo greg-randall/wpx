@@ -245,9 +245,11 @@ def parse_active_installs(html):
     if m:
         return 0
 
-    m = re.search(r'([\d,]+)\+?\s*active\s*install', html_lower)
+    m = re.search(r'(\d[\d,]*)\+?\s*active\s*install', html_lower)
     if m:
-        return int(m.group(1).replace(',', ''))
+        val = m.group(1).replace(',', '')
+        if val:
+            return int(val)
 
     return None
 
@@ -389,6 +391,13 @@ def main():
         help="How many dead slugs to write to plugins_dead.txt (0 = all, default: 2500)",
     )
     parser.add_argument(
+        "--max-age",
+        type=float,
+        default=24.0,
+        metavar="HOURS",
+        help="Skip API fetch if catalog is fresher than this many hours (default: 24, 0 = always fetch)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Print full metadata for each plugin",
@@ -403,47 +412,62 @@ def main():
         if not args.force:
             print(f"[*] Loaded previous catalog: {len(old_catalog):,} plugins.")
 
-    # 2. Fetch Active Plugins from API
-    catalog = {} if args.force else dict(old_catalog)
+    # 2. Fetch Active Plugins from API (skip if catalog is fresh enough)
+    catalog_age_h = None
+    if CATALOG_FILE.exists():
+        catalog_age_h = (time.time() - CATALOG_FILE.stat().st_mtime) / 3600
 
-    print("[*] Fetching page 1...")
-    try:
-        first = fetch_page(1)
-    except Exception as e:
-        print(f"[!] Failed to reach WordPress.org API: {e}")
-        sys.exit(1)
+    skip_api = (
+        not args.force
+        and args.max_age > 0
+        and catalog_age_h is not None
+        and catalog_age_h < args.max_age
+    )
 
-    total_pages = first["info"]["pages"]
-    total_active_reported = first["info"]["results"]
-    print(f"[*] API reports {total_active_reported:,} active plugins")
+    if skip_api:
+        print(f"[*] Catalog is {catalog_age_h:.1f}h old (< {args.max_age}h), skipping API fetch.")
+        catalog = dict(old_catalog)
+    else:
+        catalog = {} if args.force else dict(old_catalog)
 
-    for p in first["plugins"]:
-        catalog[p["slug"]] = extract(p)
-
-    def _fetch_limit_reached():
-        return args.fetch_limit > 0 and len(catalog) >= args.fetch_limit
-
-    for page in range(2, total_pages + 1):
-        if _fetch_limit_reached():
-            break
-        print(f"\r[*] API Page {page}/{total_pages} — {len(catalog):,} plugins", end="", flush=True)
+        print("[*] Fetching page 1...")
         try:
-            data = fetch_page(page)
-            for p in data.get("plugins", []):
-                catalog[p["slug"]] = extract(p)
-                if _fetch_limit_reached():
-                    break
+            first = fetch_page(1)
         except Exception as e:
-            print(f"\n[!] Page {page} failed: {e}")
+            print(f"[!] Failed to reach WordPress.org API: {e}")
+            sys.exit(1)
 
-        if page % CHECKPOINT_EVERY == 0:
-            with open(CATALOG_FILE, "w") as f:
-                json.dump(catalog, f)
-        time.sleep(POLITE_DELAY)
-    print(f"\n[+] Active plugins fetched: {len(catalog):,}")
+        total_pages = first["info"]["pages"]
+        total_active_reported = first["info"]["results"]
+        print(f"[*] API reports {total_active_reported:,} active plugins")
 
-    with open(CATALOG_FILE, "w") as f:
-        json.dump(catalog, f, indent=2)
+        for p in first["plugins"]:
+            catalog[p["slug"]] = extract(p)
+
+        def _fetch_limit_reached():
+            return args.fetch_limit > 0 and len(catalog) >= args.fetch_limit
+
+        for page in range(2, total_pages + 1):
+            if _fetch_limit_reached():
+                break
+            print(f"\r[*] API Page {page}/{total_pages} — {len(catalog):,} plugins", end="", flush=True)
+            try:
+                data = fetch_page(page)
+                for p in data.get("plugins", []):
+                    catalog[p["slug"]] = extract(p)
+                    if _fetch_limit_reached():
+                        break
+            except Exception as e:
+                print(f"\n[!] Page {page} failed: {e}")
+
+            if page % CHECKPOINT_EVERY == 0:
+                with open(CATALOG_FILE, "w") as f:
+                    json.dump(catalog, f)
+            time.sleep(POLITE_DELAY)
+        print(f"\n[+] Active plugins fetched: {len(catalog):,}")
+
+        with open(CATALOG_FILE, "w") as f:
+            json.dump(catalog, f, indent=2)
 
     # 3. Fetch Master List from SVN
     svn_slugs = fetch_svn_slugs()
