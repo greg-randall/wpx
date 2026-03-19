@@ -263,13 +263,22 @@ def parse_plugin_stats(html):
             result["active_installs"] = 0
 
     if "active_installs" not in result:
+        # "Active Installs:</strong> <meta ...> 5,000+" — label before number, tags in between
+        m = re.search(r'active\s*installs?:\s*(?:<[^>]+>\s*)*(\d[\d,]*)', html_lower)
+        if m:
+            val = m.group(1).replace(',', '')
+            if val:
+                result["active_installs"] = int(val)
+
+    if "active_installs" not in result:
+        # "10,000+ active installations" — number before label (modern layout)
         m = re.search(r'(\d[\d,]*)\+?\s*active\s*install', html_lower)
         if m:
             val = m.group(1).replace(',', '')
             if val:
                 result["active_installs"] = int(val)
 
-    # --- download count fallback (older pages: UserDownloads meta tag) ---
+    # --- download count fallback (old pages without active installs stat) ---
     if "active_installs" not in result:
         m = re.search(r'userdownloads:(\d[\d,]*)', html_lower)
         if m:
