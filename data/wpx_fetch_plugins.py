@@ -272,6 +272,9 @@ async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
     completed = 0
     enriched = 0
 
+    # Semaphore caps active workers; rate limiter ensures requests don't START
+    # within ARCHIVE_DELAY of each other regardless of concurrency.
+    sem = asyncio.Semaphore(5)
     _last_req = [0.0]
     _req_lock = asyncio.Lock()
 
@@ -286,58 +289,64 @@ async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
     async def enrich_one(session, slug):
         nonlocal completed, enriched
 
-        slug_data = dead_catalog.get(slug, {})
-        last_updated = slug_data.get("last_updated", "") if isinstance(slug_data, dict) else ""
-        cache_file = ARCHIVE_CACHE_DIR / f"{slug}.html"
+        async with sem:
+            slug_data = dead_catalog.get(slug, {})
+            last_updated = slug_data.get("last_updated", "") if isinstance(slug_data, dict) else ""
+            cache_file = ARCHIVE_CACHE_DIR / f"{slug}.html"
 
-        html = None
+            html = None
 
-        if cache_file.exists():
-            html = cache_file.read_text(encoding='utf-8', errors='ignore')
-        else:
-            cdx_ts = parse_svn_date_to_cdx(last_updated)
-            avail_url = (
-                f"{WAYBACK_AVAIL_API}"
-                f"?url=wordpress.org/plugins/{slug}/"
-                f"&timestamp={cdx_ts or ''}"
-            )
-            try:
-                resp = await rate_limited_get(session, avail_url)
-                if resp.status_code != 200:
+            if cache_file.exists():
+                html = cache_file.read_text(encoding='utf-8', errors='ignore')
+            else:
+                cdx_ts = parse_svn_date_to_cdx(last_updated)
+                avail_url = (
+                    f"{WAYBACK_AVAIL_API}"
+                    f"?url=wordpress.org/plugins/{slug}/"
+                    f"&timestamp={cdx_ts or ''}"
+                )
+                try:
+                    resp = await rate_limited_get(session, avail_url)
+                    if resp.status_code != 200:
+                        completed += 1
+                        return
+
+                    data = resp.json()
+                    closest = data.get("archived_snapshots", {}).get("closest", {})
+
+                    if not closest.get("available") or closest.get("status") != "200":
+                        completed += 1
+                        if completed % 25 == 0 or completed == total:
+                            pct = completed / total * 100
+                            print(f"\r[*] Archive: {completed}/{total} ({pct:.1f}%) — {enriched} enriched",
+                                  end="", flush=True)
+                        return
+
+                    resp2 = await rate_limited_get(session, closest["url"])
+                    if resp2.status_code != 200:
+                        completed += 1
+                        return
+
+                    html = resp2.text
+                    cache_file.write_text(html, encoding='utf-8')
+
+                except Exception:
                     completed += 1
                     return
 
-                data = resp.json()
-                closest = data.get("archived_snapshots", {}).get("closest", {})
+            installs = parse_active_installs(html) if html else None
 
-                if not closest.get("available") or closest.get("status") != "200":
-                    completed += 1
-                    return
+            completed += 1
+            if completed % 25 == 0 or completed == total:
+                pct = completed / total * 100
+                print(f"\r[*] Archive: {completed}/{total} ({pct:.1f}%) — {enriched} enriched",
+                      end="", flush=True)
 
-                resp2 = await rate_limited_get(session, closest["url"])
-                if resp2.status_code != 200:
-                    completed += 1
-                    return
-
-                html = resp2.text
-                cache_file.write_text(html, encoding='utf-8')
-
-            except Exception:
-                completed += 1
-                return
-
-        installs = parse_active_installs(html) if html else None
-
-        completed += 1
-        if completed % 100 == 0 or completed == total:
-            pct = completed / total * 100
-            print(f"\r[*] Archive: {completed}/{total} ({pct:.1f}%) — {enriched} enriched", end="", flush=True)
-
-        if installs is not None:
-            enriched += 1
-            record = {**slug_data, "slug": slug, "active_installs": installs}
-            with open(DEAD_CATALOG_FILE, "a") as f:
-                f.write(json.dumps(record) + "\n")
+            if installs is not None:
+                enriched += 1
+                record = {**slug_data, "slug": slug, "active_installs": installs}
+                with open(DEAD_CATALOG_FILE, "a") as f:
+                    f.write(json.dumps(record) + "\n")
 
     async with AsyncSession() as session:
         await asyncio.gather(*[enrich_one(session, slug) for slug in slugs_to_enrich])
