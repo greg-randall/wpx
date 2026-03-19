@@ -342,10 +342,18 @@ async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
             slug_data = dead_catalog.get(slug, {})
             last_updated = slug_data.get("last_updated", "") if isinstance(slug_data, dict) else ""
             cache_file = ARCHIVE_CACHE_DIR / f"{slug}.html"
+            none_file = ARCHIVE_CACHE_DIR / f"{slug}.none"
 
             html = None
 
-            if cache_file.exists():
+            if none_file.exists():
+                completed += 1
+                if completed % 25 == 0 or completed == total:
+                    pct = completed / total * 100
+                    print(f"\r[*] Archive: {completed}/{total} ({pct:.1f}%) — {enriched} enriched",
+                          end="", flush=True)
+                return
+            elif cache_file.exists():
                 html = cache_file.read_text(encoding='utf-8', errors='ignore')
             else:
                 cdx_ts = parse_svn_date_to_cdx(last_updated)
@@ -364,6 +372,7 @@ async def enrich_dead_with_archive(slugs_to_enrich, dead_catalog):
                     closest = data.get("archived_snapshots", {}).get("closest", {})
 
                     if not closest.get("available") or closest.get("status") != "200":
+                        none_file.touch()
                         completed += 1
                         if completed % 25 == 0 or completed == total:
                             pct = completed / total * 100
