@@ -265,6 +265,11 @@ def parse_plugin_stats(html):
         m = re.search(r'active\s*installations?\s+(?:fewer|less) than', text)
         if m:
             result["active_installs"] = 0
+    if "active_installs" not in result:
+        # "Active Installs: Less than 10" — label then fewer/less
+        m = re.search(r'active\s*install\w*:?\s*(?:fewer|less) than', text)
+        if m:
+            result["active_installs"] = 0
 
     # "active installs: 5,000+"  /  "active installations: 4,000+"  /  "active installations 30+"
     if "active_installs" not in result:
