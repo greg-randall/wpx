@@ -556,7 +556,11 @@ def main():
         and dead_catalog[s].get("downloaded") is None
     ]
     if needs_enrichment:
+        cached_html = sum(1 for s in needs_enrichment if (ARCHIVE_CACHE_DIR / f"{s}.html").exists())
+        cached_none = sum(1 for s in needs_enrichment if (ARCHIVE_CACHE_DIR / f"{s}.none").exists())
+        needs_network = len(needs_enrichment) - cached_html - cached_none
         print(f"[*] {len(needs_enrichment):,} dead plugins need Archive.org enrichment")
+        print(f"    - {cached_html:,} html  |  {cached_none:,} no-snapshot  |  {needs_network:,} need network")
         asyncio.run(enrich_dead_with_archive(needs_enrichment, dead_catalog))
         dead_catalog = load_dead_catalog()
 
