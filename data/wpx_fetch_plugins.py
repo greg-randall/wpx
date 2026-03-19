@@ -266,9 +266,9 @@ def parse_plugin_stats(html):
         if m:
             result["active_installs"] = 0
 
-    # "active installs: 5,000+"  or  "5,000+ active installations"
+    # "active installs: 5,000+"  /  "active installations: 4,000+"  /  "active installations 30+"
     if "active_installs" not in result:
-        m = re.search(r'active\s*installs?:?\s*(\d[\d,]*)', text)
+        m = re.search(r'active\s*install\w*:?\s*(\d[\d,]*)', text)
         if m:
             val = m.group(1).replace(',', '')
             if val:
