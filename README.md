@@ -21,6 +21,7 @@ WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudfla
 *   **Asynchronous scanning**: Built with `asyncio` and `curl_cffi` for fast enumeration.
 *   **Fingerprinting**: Mimics browser fingerprints and TLS handshakes to avoid detection.
 *   **WPScan API**: Integrates with the WPScan Vulnerability Database for vulnerability lookups.
+*   **Massive Plugin Catalog**: Tracks ~110,000 historical and ~55,000 current plugins.
 *   **Plugin cataloging**: Includes a script to fetch and rank plugin slugs from WordPress.org.
 *   **CLI output**: Structured terminal output similar to `wpscan`.
 *   **Stealth mode**: High-fidelity browser impersonation and TLS session mirroring.
@@ -62,7 +63,7 @@ python3 wpx.py -u https://example.com --plugins-limit 500
 ```
 
 ### Full plugin brute-force
-Scan all available plugin slugs.
+Scan every plugin ever created. WPX can traverse the entire historical library of ~110,000 plugins (including ~55,000 currently active ones) to find every trace of software on the target.
 **Warning**: This performs a massive number of requests and can take several hours to complete depending on your thread count and the target's responsiveness.
 ```bash
 python3 wpx.py -u https://example.com --full-scan
