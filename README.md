@@ -13,7 +13,7 @@
   WPX — WordPress X-Ray Scanner | WAF Bypass
 ```
 
-WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudflare and WAF challenges. It mirrors those sessions to perform fast, asynchronous plugin and theme discovery.
+WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudflare and WAF challenges. It mirrors those sessions to perform fast, asynchronous plugin and theme discovery, user enumeration, and multisite detection.
 
 **Note**: WPX downloads necessary scan metadata (fingerprints, detection rules) from `data.wpscan.org`.
 
@@ -22,11 +22,33 @@ WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudfla
 *   **WAF bypass**: Uses Camoufox headless browser to solve challenges and extract session tokens.
 *   **Asynchronous scanning**: Built with `asyncio` and `curl_cffi` for fast enumeration.
 *   **Fingerprinting**: Mimics browser fingerprints and TLS handshakes to avoid detection.
+*   **User enumeration**: Discovers WordPress usernames via REST API, author archives, oEmbed, and RSS feed.
+*   **Multisite detection**: Identifies WordPress Multisite/Network installations.
 *   **WPScan API**: Integrates with the WPScan Vulnerability Database for vulnerability lookups.
 *   **Massive Plugin Catalog**: Tracks ~110,000 historical and ~55,000 current plugins.
 *   **Plugin cataloging**: Includes a script to fetch and rank plugin slugs from WordPress.org.
 *   **CLI output**: Structured terminal output similar to `wpscan`.
 *   **Stealth mode**: High-fidelity browser impersonation and TLS session mirroring.
+
+## Docker
+
+The easiest way to run WPX — no Python or dependencies needed.
+
+### Pull and run
+```bash
+docker run ghcr.io/greg-randall/wpx -u https://example.com
+```
+
+### Save results to your machine
+```bash
+docker run -v $(pwd):/output ghcr.io/greg-randall/wpx -u https://example.com -o /output/results.txt
+```
+
+### Cache WPScan metadata between runs (optional)
+By default WPX re-downloads a small set of fingerprint files on each run. To persist them:
+```bash
+docker run -v wpx-data:/app/.wpx_data ghcr.io/greg-randall/wpx -u https://example.com
+```
 
 ## Installation
 
@@ -67,6 +89,13 @@ Scan every plugin ever created. WPX can traverse the entire historical library o
 **Warning**: This performs a massive number of requests and can take several hours to complete depending on your thread count and the target's responsiveness.
 ```bash
 python3 wpx.py -u https://example.com --full-scan
+```
+
+### User enumeration
+User enumeration runs automatically. To limit the author ID probe range or disable it entirely:
+```bash
+python3 wpx.py -u https://example.com --users-limit 20
+python3 wpx.py -u https://example.com --enum-users-disable
 ```
 
 ### Silent output and logging
@@ -114,7 +143,7 @@ The `data/` directory contains the processed plugin datasets and maintenance too
 | `--enum-users-disable` | Skip user enumeration. |
 | `--users-limit N` | Number of author IDs to probe via ?author=N (default: 10). |
 | `-q, --quiet` | Suppress banner, status, and progress — show findings only. |
-| `-o, --output FILE`| Write output to FILE (plain text, no ANSI codes). |
+| `-o, --output FILE` | Write output to FILE (plain text, no ANSI codes). |
 
 ### Plugin Fetcher (`data/wpx_fetch_plugins.py`)
 
