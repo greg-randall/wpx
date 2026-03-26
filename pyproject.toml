@@ -16,8 +16,10 @@ dependencies = [
     "lxml",
     "PyYAML",
     "packaging",
-    "beautifulsoup4",
 ]
+
+[project.optional-dependencies]
+dev = ["beautifulsoup4"]
 
 [project.scripts]
 wpx = "wpx:main"

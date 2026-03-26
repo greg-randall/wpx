@@ -24,7 +24,7 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 
-from bs4 import BeautifulSoup
+# from bs4 import BeautifulSoup
 
 DATA_DIR = Path(__file__).parent
 CATALOG_FILE = DATA_DIR / "plugins_catalog.json"
@@ -244,6 +244,13 @@ def parse_plugin_stats(html):
       downloaded      — from the UserDownloads meta tag (older pages)
     Empty dict if nothing is found.
     """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        print("\n[!] Error: beautifulsoup4 is required for Archive.org enrichment.")
+        print("[!] Please install it via: pip install '.[dev]'")
+        return {}
+
     result = {}
     soup = BeautifulSoup(html, 'lxml')
 
