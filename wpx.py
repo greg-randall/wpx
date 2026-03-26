@@ -403,22 +403,84 @@ def _run(args):
 
     # --- Users ---
     if not args.enum_users_disable:
-        if finder.found_users:
-            subitems = []
-            for u in finder.found_users:
-                login = u.get("login") or u.get("name") or "unknown"
-                uid = f"ID: {u['id']} | " if u.get("id") else ""
-                subitems.append(
-                    f"{uid}{login} | Found By: {u['found_by']} ({u['confidence']}% confidence)"
-                )
-            for method in finder.user_enum_blocked:
-                subitems.append(f"{YELLOW}Blocked:{RESET} {method}")
-            print_finding(f"User Enumeration — {len(finder.found_users)} user(s) found", subitems)
-        elif finder.user_enum_blocked:
-            subitems = [f"{GREEN}Blocked:{RESET} {m}" for m in finder.user_enum_blocked]
-            print_finding("User Enumeration — no users identified", subitems)
+        found_users = finder.found_users
+        blocked = finder.user_enum_blocked
+        has_found = bool(found_users)
+        has_blocked = bool(blocked)
+
+        # Status
+        if has_found and has_blocked:
+            status = f"{YELLOW}Partially Protected{RESET}"
+        elif has_found:
+            status = f"{RED}Vulnerable{RESET}"
+        elif has_blocked:
+            status = f"{GREEN}Fully Protected{RESET}"
         else:
-            print_info("No users identified.")
+            status = "Unknown"
+
+        # Risk level — based on which methods leaked users
+        _high_risk = {"REST API User Enumeration", "Author Archive (?author=N)", "Passive HTML Scan"}
+        _med_risk = {"oEmbed Author Leak"}
+        if has_found:
+            leaked_via = {u["found_by"] for u in found_users}
+            if leaked_via & _high_risk:
+                risk = f"{RED}High{RESET}"
+            elif leaked_via & _med_risk:
+                risk = f"{YELLOW}Medium{RESET}"
+            else:
+                risk = f"{YELLOW}Low{RESET}"
+        else:
+            risk = f"{GREEN}None{RESET}"
+
+        subitems = [f"Status: {status}"]
+        if has_found:
+            subitems.append(f"{len(found_users)} user(s) found via leakage")
+        else:
+            subitems.append("No users found")
+
+        if has_found:
+            subitems.append("")
+            subitems.append("Users Discovered:")
+            for u in found_users:
+                label = u.get("login") or u.get("name") or "unknown"
+                uid_str = f" (ID: {u['id']})" if u.get("id") else ""
+                subitems.append(f"  \u2022 {label}{uid_str}")
+                subitems.append(f"    Found By: {u['found_by']}")
+                subitems.append(f"    Confidence: {u['confidence']}%")
+
+        if has_blocked:
+            subitems.append("")
+            subitems.append("Blocked Methods:")
+            for m in blocked:
+                subitems.append(f"  {GREEN}\u2713{RESET} {m:<42}(Good)")
+
+        subitems.append("")
+        subitems.append(f"Risk Level: {risk}")
+
+        # Contextual recommendation
+        if has_found:
+            leaked_via = {u["found_by"] for u in found_users}
+            recs = []
+            if "REST API User Enumeration" in leaked_via:
+                recs.append(
+                    "Restrict the /wp/v2/users REST API endpoint to authenticated users only."
+                )
+            if leaked_via & {"Author Archive (?author=N)", "Passive HTML Scan"}:
+                recs.append(
+                    "Block ?author= redirects and disable author archive pages via your security plugin."
+                )
+            if "RSS Feed Author Leak" in leaked_via:
+                recs.append(
+                    "Apply the `the_author` and `the_content_feed` filters to hide author info from feeds."
+                )
+            if "oEmbed Author Leak" in leaked_via:
+                recs.append("Restrict or disable the oEmbed endpoint.")
+            if recs:
+                subitems.append(f"Recommendation: {recs[0]}")
+                for r in recs[1:]:
+                    subitems.append(f"  {r}")
+
+        print_finding("User Enumeration", subitems)
         print_plain()
 
     # ------------------------------------------------------------------
