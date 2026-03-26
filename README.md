@@ -44,10 +44,15 @@ docker run ghcr.io/greg-randall/wpx -u https://example.com
 docker run -v $(pwd):/output ghcr.io/greg-randall/wpx -u https://example.com -o /output/results.txt
 ```
 
-### Cache WPScan metadata between runs (optional)
-By default WPX re-downloads a small set of fingerprint files on each run. To persist them:
+### Persist WPScan metadata between runs (recommended)
+Without a volume, WPX re-downloads metadata on every run. Mount a named volume to avoid this:
 ```bash
 docker run -v wpx-data:/app/.wpx_data ghcr.io/greg-randall/wpx -u https://example.com
+```
+
+Refresh the metadata manually when needed:
+```bash
+docker run -v wpx-data:/app/.wpx_data ghcr.io/greg-randall/wpx --update
 ```
 
 ## Installation
