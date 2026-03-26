@@ -11,7 +11,8 @@ from wpx_finder import WPXFinder
 from wpx_vulnerability import WPXVulnerability
 from packaging.version import Version, InvalidVersion
 from wpx_output import (
-    print_banner, print_finding, print_info, print_warn, print_status,
+    init_output,
+    print_banner, print_finding, print_info, print_warn, print_status, print_plain,
     GREEN, YELLOW, RED, RESET,
 )
 
@@ -66,9 +67,23 @@ def main():
                         help="Force update of WPScan metadata files")
     parser.add_argument("--no-browser", action="store_true",
                         help="Skip Camoufox WAF bypass and connect directly (no stealth)")
+    parser.add_argument("--quiet", "-q", action="store_true",
+                        help="Suppress banner, status, and progress — show findings only")
+    parser.add_argument("--output", "-o", metavar="FILE",
+                        help="Write output to FILE (plain text, no ANSI codes)")
 
     args = parser.parse_args()
 
+    out_file = open(args.output, 'w', encoding='utf-8') if args.output else None
+    try:
+        init_output(quiet=args.quiet, output_file=out_file)
+        _run(args)
+    finally:
+        if out_file:
+            out_file.close()
+
+
+def _run(args):
     if args.update:
         print_banner()
         data = WPXData(force_update=True)
@@ -85,7 +100,7 @@ def main():
     print_banner()
     print_status(f"Scanning: {target_url}")
     print_status(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+    print_plain()
 
     # 1. Initialize Data
     data = WPXData()
@@ -93,7 +108,7 @@ def main():
     if stale:
         print_warn(f"Some data files are older than 30 days or missing: {', '.join(stale[:3])}...")
         print_warn("It is recommended to run: python3 wpx.py --update")
-        print()
+        print_plain()
 
     data.download_metadata()
     data.load_dynamic_finders()
@@ -178,7 +193,7 @@ def main():
         finder.detect_versions()
 
     except KeyboardInterrupt:
-        print()
+        print_plain()
         print_warn("Scan interrupted by user (Ctrl+C). Showing partial results...")
 
     # 5. Vulnerability API
@@ -191,11 +206,11 @@ def main():
     # ------------------------------------------------------------------
     # 5. Rich output
     # ------------------------------------------------------------------
-    print()
-    print("=" * 60)
+    print_plain()
+    print_plain("=" * 60)
     print_status(f"WPX Scan Results for: {target_url}")
-    print("=" * 60)
-    print()
+    print_plain("=" * 60)
+    print_plain()
 
     # --- Headers ---
     if finder.headers_result and finder.headers_result["entries"]:
@@ -206,7 +221,7 @@ def main():
         subitems.append(f"Found By: {hr['found_by']}")
         subitems.append(f"Confidence: {hr['confidence']}%")
         print_finding("Headers", subitems)
-        print()
+        print_plain()
 
     # --- robots.txt ---
     if "robots_txt" in finder.core_files:
@@ -219,7 +234,7 @@ def main():
         subitems.append(f"Found By: {rt['found_by']}")
         subitems.append(f"Confidence: {rt['confidence']}%")
         print_finding(f"robots.txt found: {rt['url']}", subitems)
-        print()
+        print_plain()
 
     # --- XML-RPC ---
     if "xmlrpc" in finder.core_files:
@@ -228,7 +243,7 @@ def main():
         for ref in xi["references"]:
             subitems.append(f" - {ref}")
         print_finding(f"XML-RPC seems to be enabled: {xi['url']}", subitems)
-        print()
+        print_plain()
 
     # --- WP-Cron ---
     if "wp_cron" in finder.core_files:
@@ -237,7 +252,7 @@ def main():
         for ref in wc["references"]:
             subitems.append(f" - {ref}")
         print_finding(f"The external WP-Cron seems to be enabled: {wc['url']}", subitems)
-        print()
+        print_plain()
 
     # --- WordPress readme.html ---
     if "readme" in finder.core_files:
@@ -246,7 +261,7 @@ def main():
             f"WordPress readme found: {rd['url']}",
             [f"Found By: {rd['found_by']}", f"Confidence: {rd['confidence']}%"],
         )
-        print()
+        print_plain()
 
     # --- WP Version ---
     if finder.wp_version:
@@ -276,7 +291,7 @@ def main():
             subitems.append(f" - {cb['url']}{match_str}")
 
         print_finding(f"WordPress version {ver_label}", subitems)
-        print()
+        print_plain()
 
     # --- Theme ---
     if finder.theme and isinstance(finder.theme, dict):
@@ -301,13 +316,13 @@ def main():
             subitems.append(f"Version: {ver} ({conf}% confidence)")
             subitems.append(f"Found By: {th['version_found_by']}")
         print_finding(f"WordPress theme in use: {th['slug']}", subitems)
-        print()
+        print_plain()
 
     # --- Config Backups ---
     if finder.config_backups:
         for bu in finder.config_backups:
             print_finding(f"A Config Backup file has been found: {bu}")
-        print()
+        print_plain()
 
     # --- Plugins ---
     if not finder.found_plugins:
@@ -374,17 +389,17 @@ def main():
                     print_finding(slug, subitems)
             else:
                 print_finding(slug, subitems)
-            print()
+            print_plain()
 
     # ------------------------------------------------------------------
     # 6. Summary
     # ------------------------------------------------------------------
     elapsed = time.time() - start_time
     elapsed_str = str(timedelta(seconds=int(elapsed)))
-    print("=" * 60)
+    print_plain("=" * 60)
     print_finding(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_finding(f"Elapsed time: {elapsed_str}")
-    print()
+    print_plain()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import re
 from lxml import html
+from wpx_output import print_status, print_info, print_progress, print_progress_done
 
 XMLRPC_REFERENCES = [
     "http://codex.wordpress.org/XML-RPC_Pingback_API",
@@ -337,7 +338,7 @@ class WPXFinder:
         for i, path in enumerate(backups):
             url = f"{base}/{path}"
             pct = (i + 1) / total * 100
-            print(f"\r[*] Checking Config Backups - ({i + 1} / {total}) {pct:.2f}%", end="", flush=True)
+            print_progress(f"Checking Config Backups - ({i + 1} / {total}) {pct:.2f}%")
             try:
                 res = self.core.session.get(url, impersonate="firefox", timeout=10, allow_redirects=True)
                 if res.status_code == 200:
@@ -354,7 +355,7 @@ class WPXFinder:
             except Exception:
                 pass
 
-        print()  # newline after progress bar
+        print_progress_done()
         self.config_backups = found
         return found
 
@@ -363,7 +364,7 @@ class WPXFinder:
     # ------------------------------------------------------------------
 
     def scan_plugins(self, slugs, threads=20):
-        print(f"[*] Brute-forcing {len(slugs)} plugins with {threads} threads...")
+        print_status(f"Brute-forcing {len(slugs)} plugins with {threads} threads...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             results = pool.submit(asyncio.run, self._scan_plugins_async(slugs, threads)).result()
         base = self.core.target_url.rstrip('/')
@@ -381,7 +382,7 @@ class WPXFinder:
                         "confirmed_by": None,
                         "location": f"{base}/wp-content/plugins/{slug}/",
                     }
-        print(f"[+] Found {len(self.found_plugins)} plugins.")
+        print_info(f"Found {len(self.found_plugins)} plugins.")
 
     async def _scan_plugins_async(self, slugs, concurrency):
         from curl_cffi.requests import AsyncSession
@@ -407,7 +408,7 @@ class WPXFinder:
                     )
                     completed += 1
                     pct = completed / total * 100
-                    print(f"\r[*] Brute-forcing plugins - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
+                    print_progress(f"Brute-forcing plugins - ({completed} / {total}) {pct:.2f}%")
                     if res.status_code in [200, 403]:
                         return slug, res.status_code
                 except Exception:
@@ -417,7 +418,7 @@ class WPXFinder:
         async with AsyncSession() as session:
             tasks = [check_plugin(session, slug) for slug in slugs]
             results = await asyncio.gather(*tasks)
-            print()  # newline after progress bar
+            print_progress_done()
             return results
 
     # ------------------------------------------------------------------
@@ -483,7 +484,7 @@ class WPXFinder:
             return match.group(1) if match.groups() else match.group(0)
 
     def detect_versions(self):
-        print("[*] Detecting plugin versions...")
+        print_status("Detecting plugin versions...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             results = pool.submit(asyncio.run, self._detect_versions_async()).result()
         for slug, version, confidence, found_by, source_url in results:
@@ -518,7 +519,7 @@ class WPXFinder:
             if version != "Unknown":
                 completed += 1
                 pct = completed / total * 100
-                print(f"\r[*] Detecting versions - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
+                print_progress(f"Detecting versions - ({completed} / {total}) {pct:.2f}%")
                 return slug, version, confidence, found_by, source_url
 
             # 2. Readme — fetch and extract "Stable tag:"
@@ -540,7 +541,7 @@ class WPXFinder:
                         )
                         completed += 1
                         pct = completed / total * 100
-                        print(f"\r[*] Detecting versions - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
+                        print_progress(f"Detecting versions - ({completed} / {total}) {pct:.2f}%")
                         if res.status_code == 200:
                             stable = re.search(
                                 r'Stable tag:\s*([\d.]+)', res.text, re.IGNORECASE
@@ -553,14 +554,14 @@ class WPXFinder:
             else:
                 completed += 1
                 pct = completed / total * 100
-                print(f"\r[*] Detecting versions - ({completed} / {total}) {pct:.2f}%", end="", flush=True)
+                print_progress(f"Detecting versions - ({completed} / {total}) {pct:.2f}%")
 
             return slug, "Unknown", 0, None, None
 
         async with AsyncSession() as session:
             tasks = [process_version(session, slug) for slug in slugs]
             results = await asyncio.gather(*tasks)
-            print()  # newline after progress bar
+            print_progress_done()
             return results
 
 
@@ -581,4 +582,3 @@ if __name__ == "__main__":
         test_slugs = ["contact-form-7", "elementor", "wp-rocket", "wordfence"]
         finder.scan_plugins(test_slugs)
         finder.detect_versions()
-        print(finder.found_plugins)

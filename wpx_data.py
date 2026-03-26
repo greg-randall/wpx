@@ -4,6 +4,7 @@ import time
 import urllib.request
 import yaml
 from pathlib import Path
+from wpx_output import print_status, print_warn
 
 DATA_DIR = Path(".wpx_data")
 BASE_URL = "https://data.wpscan.org/"
@@ -83,32 +84,32 @@ class WPXData:
         return stale
 
     def download_metadata(self):
-        print("[*] Checking for WPScan metadata updates...")
+        print_status("Checking for WPScan metadata updates...")
         for filename in FILES:
             local_path = DATA_DIR / filename
             if not local_path.exists() or self.force_update:
                 url = f"{BASE_URL}{filename}"
-                print(f"  - Downloading {filename} from {BASE_URL}...")
+                print_status(f"Downloading {filename} from {BASE_URL}...")
                 try:
                     urllib.request.urlretrieve(url, local_path)
                 except Exception as e:
-                    print(f"  [!] Failed to download {filename}: {e}")
+                    print_warn(f"Failed to download {filename}: {e}")
 
     def load_dynamic_finders(self):
         df_file = DATA_DIR / "dynamic_finders.yml"
         if df_file.exists():
-            print("[*] Loading dynamic finders...")
+            print_status("Loading dynamic finders...")
             with open(df_file, "r") as f:
                 data = yaml.safe_load(f)
                 self.dynamic_finders = data.get("plugins", {})
-                print(f"  - Loaded {len(self.dynamic_finders)} plugin detection rules.")
+                print_status(f"Loaded {len(self.dynamic_finders)} plugin detection rules.")
 
     def load_slugs(self):
         plugin_file = DATA_DIR / "plugins.txt"
         if plugin_file.exists():
             with open(plugin_file, "r") as f:
                 self.plugins = [line.strip() for line in f if line.strip()]
-            print(f"  - Loaded {len(self.plugins)} plugin slugs.")
+            print_status(f"Loaded {len(self.plugins)} plugin slugs.")
 
         backup_file = DATA_DIR / "config_backups.txt"
         if backup_file.exists():

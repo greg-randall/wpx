@@ -4,6 +4,7 @@ from curl_cffi import requests
 import importlib.metadata
 import time
 import traceback
+from wpx_output import print_status, print_warn
 
 
 class WPXCore:
@@ -14,7 +15,7 @@ class WPXCore:
         self.session = None
 
     def bypass_waf(self):
-        print(f"[*] Launching Camoufox to bypass WAF for {self.target_url}...")
+        print_status(f"Launching Camoufox to bypass WAF for {self.target_url}...")
         try:
             # Pass a realistic screen size — WSL's virtual display is 640x480
             # which is below the minimum resolution in browserforge's training data,
@@ -29,7 +30,7 @@ class WPXCore:
                 # Allow extra time for WAF JS challenge redirect to complete
                 time.sleep(5)
 
-                print("[+] Page loaded. Extracting session tokens...")
+                print_status("Page loaded. Extracting session tokens...")
 
                 # Extract cookies
                 self.cookies = {c['name']: c['value'] for c in page.context.cookies()}
@@ -37,36 +38,35 @@ class WPXCore:
                 # Extract the exact User-Agent used by Camoufox
                 self.user_agent = page.evaluate("navigator.userAgent")
 
-                print(f"[*] Extracted User-Agent: {self.user_agent[:60]}...")
-                print(f"[*] Extracted {len(self.cookies)} cookies.")
+                print_status(f"Extracted User-Agent: {self.user_agent[:60]}...")
+                print_status(f"Extracted {len(self.cookies)} cookies.")
 
                 return True
         except Exception as e:
-            print()
-            print("[!] ── Camoufox launch failed ─────────────────────────────────────")
-            print(f"[!]  Error type : {type(e).__name__}")
-            print(f"[!]  Message    : {e}")
-            print("[!]")
-            print("[!]  Traceback:")
+            print_warn("── Camoufox launch failed ─────────────────────────────────────")
+            print_warn(f" Error type : {type(e).__name__}")
+            print_warn(f" Message    : {e}")
+            print_warn("")
+            print_warn(" Traceback:")
             for line in traceback.format_exc().splitlines():
-                print(f"[!]    {line}")
-            print("[!]")
-            print("[!]  Installed versions:")
+                print_warn(f"   {line}")
+            print_warn("")
+            print_warn(" Installed versions:")
             for pkg in ("camoufox", "browserforge", "playwright"):
                 try:
                     ver = importlib.metadata.version(pkg)
                 except importlib.metadata.PackageNotFoundError:
                     ver = "NOT INSTALLED"
-                print(f"[!]    {pkg}: {ver}")
+                print_warn(f"   {pkg}: {ver}")
             if "No headers based on this input" in str(e):
-                print("[!]")
-                print("[!]  Diagnosis: browserforge could not find a fingerprint matching the")
-                print("[!]             screen size detected by camoufox. This commonly happens")
-                print("[!]             on WSL/headless Linux where the virtual display is very")
-                print("[!]             small (e.g. 640x480), below the minimum in the training")
-                print("[!]             data. WPX passes an explicit screen size to work around")
-                print("[!]             this — if you see this error, please report it.")
-            print("[!] ──────────────────────────────────────────────────────────────")
+                print_warn("")
+                print_warn(" Diagnosis: browserforge could not find a fingerprint matching the")
+                print_warn("            screen size detected by camoufox. This commonly happens")
+                print_warn("            on WSL/headless Linux where the virtual display is very")
+                print_warn("            small (e.g. 640x480), below the minimum in the training")
+                print_warn("            data. WPX passes an explicit screen size to work around")
+                print_warn("            this — if you see this error, please report it.")
+            print_warn("──────────────────────────────────────────────────────────────")
             return False
 
     _DEFAULT_UA = (
@@ -76,9 +76,9 @@ class WPXCore:
     def setup_mirror_session(self):
         bypassed = bool(self.user_agent)
         if bypassed:
-            print("[*] Initializing mirrored curl_cffi session (WAF bypass active)...")
+            print_status("Initializing mirrored curl_cffi session (WAF bypass active)...")
         else:
-            print("[*] Initializing direct curl_cffi session (no WAF bypass)...")
+            print_status("Initializing direct curl_cffi session (no WAF bypass)...")
 
         self.session = requests.Session()
         ua = self.user_agent or self._DEFAULT_UA
@@ -95,7 +95,7 @@ class WPXCore:
             "Sec-Fetch-User": "?1",
         })
 
-        print("[*] Testing session...")
+        print_status("Testing session...")
         try:
             res = self.session.get(
                 self.target_url,
@@ -103,22 +103,22 @@ class WPXCore:
                 impersonate="firefox",
                 timeout=30
             )
-            print(f"[*] Session test status: {res.status_code}")
+            print_status(f"Session test status: {res.status_code}")
 
             if res.status_code == 200:
                 if bypassed:
-                    print("[+] Mirror session validated! We are through the WAF.")
+                    print_status("Mirror session validated! We are through the WAF.")
                 else:
-                    print("[+] Direct session OK (site does not appear to require WAF bypass).")
+                    print_status("Direct session OK (site does not appear to require WAF bypass).")
                 return True
             else:
                 if bypassed:
-                    print(f"[!] Mirror session failed with status {res.status_code} — WAF may still be blocking.")
+                    print_warn(f"Mirror session failed with status {res.status_code} — WAF may still be blocking.")
                 else:
-                    print(f"[!] Direct session returned status {res.status_code} — site may require WAF bypass.")
+                    print_warn(f"Direct session returned status {res.status_code} — site may require WAF bypass.")
                 return False
         except Exception as e:
-            print(f"[!] Session test failed: {e}")
+            print_warn(f"Session test failed: {e}")
             return False
 
 
