@@ -735,13 +735,24 @@ class WPXFinder:
             url = f"{base}/?author={i}"
             print_progress(f"Author archive - probing ID {i}/{users_limit}")
             try:
+                # Don't follow redirects — WordPress puts the raw /author/slug/ path
+                # in the Location header of the first redirect. Following all the way
+                # to the final URL can lose the slug after site-level rewriting.
                 res = self.core.session.get(
-                    url, impersonate="firefox", timeout=10, allow_redirects=True
+                    url, impersonate="firefox", timeout=10, allow_redirects=False
                 )
-                final_url = str(res.url)
-                m = re.search(r'/author/([^/?#]+)/?', final_url)
-                if m:
-                    slug = m.group(1)
+                slug = None
+                if res.status_code in (301, 302, 303, 307, 308):
+                    location = res.headers.get("Location") or res.headers.get("location", "")
+                    m = re.search(r'/author/([^/?#\s]+)', location)
+                    if m:
+                        slug = m.group(1)
+                elif res.status_code == 200:
+                    # Some setups serve the author page directly without redirecting
+                    m = re.search(r'/author/([^/?#"\'<>\s]+)/', res.text)
+                    if m:
+                        slug = m.group(1)
+                if slug:
                     found_any = True
                     if slug not in seen_slugs:
                         seen_slugs.add(slug)
