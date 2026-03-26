@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["beautifulsoup4"]
+dev = ["beautifulsoup4", "pytest", "pytest-mock"]
 
 [project.scripts]
 wpx = "wpx:main"
