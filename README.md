@@ -49,6 +49,8 @@ python3 -m camoufox fetch
 python3 wpx.py -u https://example.com
 ```
 
+**[View Example Output](example-output.txt)**
+
 ### Vulnerability scan (requires API key)
 ```bash
 python3 wpx.py -u https://example.com --api-key YOUR_API_KEY

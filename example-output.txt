@@ -1,0 +1,158 @@
+$ python3 wpx.py -u https://example.com/
+
+ █     █░ ██▓███     ▒██   ██▒ ██▀███   ▄▄▄     ▓██   ██▓
+▓█░ █ ░█░▓██░  ██▒   ▒▒ █ █ ▒░▓██ ▒ ██▒▒████▄    ▒██  ██▒
+▒█░ █ ░█ ▓██░ ██▓▒   ░░  █   ░▓██ ░▄█ ▒▒██  ▀█▄   ▒██ ██░
+░█░ █ ░█ ▒██▄█▓▒ ▒    ░ █ █ ▒ ▒██▀▀█▄  ░██▄▄▄▄██  ░ ▐██▓░
+░░██▒██▓ ▒██▒ ░  ░   ▒██▒ ▒██▒░██▓ ▒██▒ ▓█   ▓██▒ ░ ██▒▓░
+░ ▓░▒ ▒  ▒▓▒░ ░  ░   ▒▒ ░ ░▓ ░░ ▒▓ ░▒▓░ ▒▒   ▓▒█░  ██▒▒▒
+  ▒ ░ ░  ░▒ ░        ░░   ░▒ ░  ░▒ ░ ▒░  ▒   ▒▒ ░▓██ ░▒░
+  ░   ░  ░░           ░    ░    ░░   ░   ░   ▒   ▒ ▒ ░░
+    ░                 ░    ░     ░           ░  ░░ ░
+                                                 ░ ░
+
+    WordPress X-Ray Scanner | WAF Bypass
+
+[*] Scanning: https://example.com/
+[*] Started: 2026-03-26 13:57:13
+
+[*] Checking for WPScan metadata updates...
+[*] Loading dynamic finders...
+[*] Loaded 31021 plugin detection rules.
+[*] Loaded 1500 plugin slugs.
+[*] Launching Camoufox to bypass WAF for https://example.com/...
+[*] Page loaded. Extracting session tokens...
+[*] Extracted User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20...
+[*] Extracted 2 cookies.
+[*] Initializing mirrored curl_cffi session (WAF bypass active)...
+[*] Testing session...
+[*] Session test status: 200
+[*] Mirror session validated! We are through the WAF.
+[*] Checking Config Backups - (137 / 137) 100.00%
+[*] Default scan: 200 slugs (top 200) from data/plugins_full.txt
+[*] Brute-forcing 200 plugins with 20 threads...
+[*] Brute-forcing plugins - (200 / 200) 100.00%
+[i] Found 6 plugins.
+[*] Detecting plugin versions...
+[*] Detecting versions - (6 / 6) 100.00%
+[*] Enumerating users...
+[*] Trying REST API User Enumeration...
+[*] Author archive - probing ID 10/10
+
+============================================================
+[*] WPX Scan Results for: https://example.com/
+============================================================
+
+[+] Headers
+ | Interesting Entries:
+ |  - server: Apache
+ |  - x-powered-by: PHP/8.3.23
+ |  - link: <https://example.com/wp-json/>; rel="https://api.w.org/", <https://example.com/wp-json/wp/v2/pages/324>; rel="alternate"; title="JSON"; type="application/json", <https://example.com/>; rel=shortlink
+ | Found By: Headers (Passive Detection)
+ | Confidence: 100%
+
+[+] robots.txt found: https://example.com/robots.txt
+ | Interesting Entries:
+ |  - /wp-admin/
+ |  - /wp-admin/admin-ajax.php
+ | Found By: Robots Txt (Aggressive Detection)
+ | Confidence: 100%
+
+[+] The external WP-Cron seems to be enabled: https://example.com/wp-cron.php
+ | Found By: Direct Access (Aggressive Detection)
+ | Confidence: 60%
+ | References:
+ |  - https://www.iplocation.net/defend-wordpress-from-ddos
+ |  - https://github.com/wpscanteam/wpscan/issues/1299
+
+[+] This site appears to be a WordPress Multisite: https://example.com/wp-signup.php
+ | Found By: Direct Access (Aggressive Detection)
+ | Confidence: 90%
+ | Reference: https://wordpress.org/documentation/article/create-a-network/
+
+[+] WordPress version 6.7.1 identified (Outdated, latest: 6.7.2)
+ | Found By: Meta Generator (Passive Detection)
+ |  - https://example.com/, Match: 'WordPress 6.7.1'
+ | Confirmed By: Rss Generator (Aggressive Detection)
+ |  - https://example.com/feed/, Match: '<generator>https://wordpress.org/?v=6.7.1</generator>'
+
+[+] WordPress theme in use: flavor
+ | Location: https://example.com/wp-content/themes/flavor/
+ | Style URL: https://example.com/wp-content/themes/flavor/style.css
+ | Style Name: flavor
+ | Description: A starter theme for WordPress.
+ | Author: flavor
+ | Found By: Urls In Homepage (Passive Detection)
+ | Version: 2.1.0 (80% confidence)
+ | Found By: Style (Passive Detection) - https://example.com/wp-content/themes/flavor/style.css
+
+[+] wordpress-seo
+ | Location: https://example.com/wp-content/plugins/wordpress-seo/
+ | Found By: Known Locations (Aggressive Detection)
+ | Version: 27.0 (100% confidence)
+ | Found By: Readme - Stable Tag (Aggressive Detection)
+ |  - https://example.com/wp-content/plugins/wordpress-seo/readme.txt
+
+[+] akismet
+ | Location: https://example.com/wp-content/plugins/akismet/
+ | Found By: Known Locations (Aggressive Detection)
+
+[+] redirection
+ | Location: https://example.com/wp-content/plugins/redirection/
+ | Found By: Known Locations (Aggressive Detection)
+ | Version: 5.7.3 (100% confidence)
+ | Found By: Readme - Stable Tag (Aggressive Detection)
+ |  - https://example.com/wp-content/plugins/redirection/readme.txt
+
+[+] wordpress-importer
+ | Location: https://example.com/wp-content/plugins/wordpress-importer/
+ | Found By: Known Locations (Aggressive Detection)
+ | Version: 0.9.5 (100% confidence)
+ | Found By: Readme - Stable Tag (Aggressive Detection)
+ |  - https://example.com/wp-content/plugins/wordpress-importer/readme.txt
+
+[+] better-search-replace
+ | Location: https://example.com/wp-content/plugins/better-search-replace/
+ | Found By: Known Locations (Aggressive Detection)
+
+[+] broken-link-checker
+ | Location: https://example.com/wp-content/plugins/broken-link-checker/
+ | Found By: Known Locations (Aggressive Detection)
+ | Version: 2.4.7 (100% confidence)
+ | Found By: Readme - Stable Tag (Aggressive Detection)
+ |  - https://example.com/wp-content/plugins/broken-link-checker/readme.txt
+
+[+] User Enumeration
+ | Status: Vulnerable
+ | 7 user(s) found via leakage
+ |
+ | Users Discovered:
+ |   • admin (ID: 1)
+ |     Found By: REST API User Enumeration
+ |     Confidence: 95%
+ |   • jim (ID: 2)
+ |     Found By: REST API User Enumeration
+ |     Confidence: 95%
+ |   • jimmothy (ID: 5)
+ |     Found By: REST API User Enumeration
+ |     Confidence: 95%
+ |   • jimena (ID: 12)
+ |     Found By: REST API User Enumeration
+ |     Confidence: 95%
+ |   • jimberta (ID: 18)
+ |     Found By: REST API User Enumeration
+ |     Confidence: 95%
+ |   • jimbo (ID: 3)
+ |     Found By: Author Archive (?author=N)
+ |     Confidence: 85%
+ |   • jimtastic (ID: 9)
+ |     Found By: Author Archive (?author=N)
+ |     Confidence: 85%
+ |
+ | Risk Level: High
+ | Recommendation: Restrict the /wp/v2/users REST API endpoint to authenticated users only.
+ |   Block ?author= redirects and disable author archive pages via your security plugin.
+
+============================================================
+[+] Finished: 2026-03-26 13:58:02
+[+] Elapsed time: 0:00:48
