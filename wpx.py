@@ -9,10 +9,23 @@ from wpx_data import WPXData
 from wpx_core import WPXCore
 from wpx_finder import WPXFinder
 from wpx_vulnerability import WPXVulnerability
+from packaging.version import Version, InvalidVersion
 from wpx_output import (
     print_banner, print_finding, print_info, print_warn, print_status,
     GREEN, YELLOW, RED, RESET,
 )
+
+
+def _is_version_affected(detected: str, fixed_in) -> bool:
+    """Return True if the detected version is still affected by this vulnerability."""
+    if not fixed_in or fixed_in == "N/A":
+        return True  # unknown fix point — assume affected
+    if not detected or detected == "Unknown":
+        return True  # unknown installed version — assume affected
+    try:
+        return Version(detected) < Version(str(fixed_in))
+    except InvalidVersion:
+        return True  # unparseable version — assume affected
 
 
 def _ver_status(plugin_info, api_result):
@@ -51,6 +64,8 @@ def main():
                         help="Scan all available plugin slugs (up to 50k+ if fetched)")
     parser.add_argument("--update", action="store_true",
                         help="Force update of WPScan metadata files")
+    parser.add_argument("--no-browser", action="store_true",
+                        help="Skip Camoufox WAF bypass and connect directly (no stealth)")
 
     args = parser.parse_args()
 
@@ -63,6 +78,8 @@ def main():
         sys.exit(0)
 
     target_url = args.url
+    if "://" not in target_url:
+        target_url = "https://" + target_url
     start_time = time.time()
 
     print_banner()
@@ -83,14 +100,19 @@ def main():
     data.load_slugs()
     data.load_wp_metadata()
 
-    # 2. Bypass Cloudflare / WAF
+    # 2. WAF Bypass
     core = WPXCore(target_url)
-    if not core.bypass_cloudflare():
-        print_warn("Could not bypass Cloudflare. Aborting.")
-        sys.exit(1)
+    if args.no_browser:
+        print_warn("--no-browser: skipping WAF bypass, using direct session.")
+    else:
+        bypassed = core.bypass_waf()
+        if not bypassed:
+            print_warn("WAF bypass failed. See diagnostic output above.")
+            print_warn("  Skip bypass  : python3 wpx.py --no-browser -u " + target_url)
+            sys.exit(1)
 
     if not core.setup_mirror_session():
-        print_warn("Could not establish a mirrored session. Aborting.")
+        print_warn("Could not establish a session (WAF may be blocking). Aborting.")
         sys.exit(1)
 
     # 3. Discovery Engine
@@ -330,16 +352,26 @@ def main():
 
             # Vulnerabilities
             if ar and ar.get("vulns"):
-                vulns = ar["vulns"]
-                title_str = f"{RED}[VULNERABLE]{RESET} {slug}"
-                subitems.append(f"{len(vulns)} vulnerability/ies found:")
-                for vuln in vulns:
-                    subitems.append(f" | Title: {vuln['title']}")
-                    subitems.append(f" | Fixed In: {vuln.get('fixed_in', 'N/A')}")
-                    refs = vuln.get("references", {}).get("url", [])
-                    if refs:
-                        subitems.append(f" | References: {refs[0]}")
-                print_finding(title_str, subitems)
+                all_vulns = ar["vulns"]
+                vulns = [v for v in all_vulns if _is_version_affected(version, v.get("fixed_in"))]
+                skipped = len(all_vulns) - len(vulns)
+                if vulns:
+                    title_str = f"{RED}[VULNERABLE]{RESET} {slug}"
+                    count_note = f"{len(vulns)} active vulnerability/ies found"
+                    if skipped:
+                        count_note += f" ({len(all_vulns)} total, {skipped} fixed in current version)"
+                    subitems.append(count_note + ":")
+                    for vuln in vulns:
+                        subitems.append(f" | Title: {vuln['title']}")
+                        subitems.append(f" | Fixed In: {vuln.get('fixed_in', 'N/A')}")
+                        refs = vuln.get("references", {}).get("url", [])
+                        if refs:
+                            subitems.append(f" | References: {refs[0]}")
+                    print_finding(title_str, subitems)
+                else:
+                    if skipped:
+                        subitems.append(f"No active vulnerabilities ({skipped} historical, all fixed)")
+                    print_finding(slug, subitems)
             else:
                 print_finding(slug, subitems)
             print()

@@ -51,7 +51,7 @@ def print_banner():
             out.append(ch)
         out.append(RESET)
         print("".join(out))
-    print(f"\n{CYAN}    WordPress X-Ray Scanner | WAF/Cloudflare Bypass{RESET}\n")
+    print(f"\n{CYAN}    WordPress X-Ray Scanner | WAF Bypass{RESET}\n")
 
 
 def print_finding(title, subitems=None):

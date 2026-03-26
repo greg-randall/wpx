@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import re
 from lxml import html
 
@@ -363,7 +364,8 @@ class WPXFinder:
 
     def scan_plugins(self, slugs, threads=20):
         print(f"[*] Brute-forcing {len(slugs)} plugins with {threads} threads...")
-        results = asyncio.run(self._scan_plugins_async(slugs, threads))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            results = pool.submit(asyncio.run, self._scan_plugins_async(slugs, threads)).result()
         base = self.core.target_url.rstrip('/')
         for item in results:
             if item:
@@ -430,7 +432,17 @@ class WPXFinder:
         """
         # 1. HeaderPattern
         if "HeaderPattern" in rules:
-            for finder_name, config in rules["HeaderPattern"].items():
+            hp = rules["HeaderPattern"]
+            # Two possible shapes in the YAML:
+            #   flat:   {header: "X-Foo", pattern: <re>}
+            #   nested: {finder_name: {header: "X-Foo", pattern: <re>}, ...}
+            if isinstance(hp, dict) and "header" in hp:
+                hp_configs = [("HeaderPattern", hp)]
+            else:
+                hp_configs = hp.items() if isinstance(hp, dict) else []
+            for finder_name, config in hp_configs:
+                if not isinstance(config, dict):
+                    continue
                 header_name = config.get("header", "")
                 # Case-insensitive header lookup
                 val = next((v for k, v in headers.items() if k.lower() == header_name.lower()), None)
@@ -472,7 +484,8 @@ class WPXFinder:
 
     def detect_versions(self):
         print("[*] Detecting plugin versions...")
-        results = asyncio.run(self._detect_versions_async())
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            results = pool.submit(asyncio.run, self._detect_versions_async()).result()
         for slug, version, confidence, found_by, source_url in results:
             self.found_plugins[slug]["version"] = version
             self.found_plugins[slug]["version_confidence"] = confidence
@@ -562,7 +575,7 @@ if __name__ == "__main__":
     data.load_slugs()
 
     core = WPXCore(url)
-    if core.bypass_cloudflare():
+    if core.bypass_waf():
         core.setup_mirror_session()
         finder = WPXFinder(core, data)
         test_slugs = ["contact-form-7", "elementor", "wp-rocket", "wordfence"]
