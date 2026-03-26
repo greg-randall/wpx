@@ -116,12 +116,13 @@ WPX is a Python implementation focused on WAF evasion and speed.
 |------|-------------|
 | `-u, --url` | Target WordPress URL (required). |
 | `--api-key` | WPScan Vulnerability Database API Key. |
-| `-e, --enumerate` | Enumeration type: `p` (plugins), `vp` (vulnerable plugins). |
 | `-t, --threads` | Concurrent threads for scanning (Default: 20). |
 | `--plugins-limit` | Limit the number of plugins to scan (e.g. 500, 5000). |
 | `--full-scan` | Scans all available plugin slugs (up to 50k+). |
 | `--update` | Force update of WPScan metadata files. |
 | `--no-browser` | Skip Camoufox WAF bypass and connect directly. |
+| `--enum-users-disable` | Skip user enumeration. |
+| `--users-limit N` | Number of author IDs to probe via ?author=N (default: 10). |
 | `-q, --quiet` | Suppress banner, status, and progress — show findings only. |
 | `-o, --output FILE`| Write output to FILE (plain text, no ANSI codes). |
 
