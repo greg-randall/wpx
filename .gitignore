@@ -5,3 +5,4 @@ __pycache__/*
 *.7z
 *.zip
 old/*
+data/archive.org-cache/
