@@ -98,17 +98,6 @@ The `data/` directory contains the processed plugin datasets and maintenance too
 *   **`data/archive.org-cache/`**: Raw HTML snapshots from the Wayback Machine, used to recover historical install counts for plugins closed before the first catalog run.
 *   **`data/wpx_fetch_plugins.py`**: Fetcher that combines the WordPress.org API, SVN repository, and Archive.org to build and enrich the plugin lists.
 
-## Comparison with WPScan
-
-WPX is a Python implementation focused on WAF evasion and speed.
-
-| Feature | Original WPScan (Ruby) | WPX (Python) |
-|---------|------------------------|--------------|
-| **Engine** | Ruby / Typhoeus | Python / Asyncio / curl_cffi |
-| **WAF bypass** | Manual | Automatic (Camoufox) |
-| **Speed** | Multi-threaded | Asynchronous |
-| **Stealth** | Standard | Browser fingerprinting |
-
 ## Advanced Options
 
 ### Main Scanner (`wpx.py`)
