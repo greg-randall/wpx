@@ -199,10 +199,6 @@ def _run(args):
         # Theme details
         finder.detect_theme_details()
 
-        # Config backups
-        if data.backups:
-            finder.check_config_backups()
-
         # 4. Active plugin brute-force selection
         best_source = None
         for candidate in [Path("data/plugins_full.txt"), Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
@@ -245,6 +241,10 @@ def _run(args):
                 techniques=data.user_enum_techniques,
                 users_limit=args.users_limit,
             )
+
+        # Config backups (low hit rate — run last to preserve requests for high-value checks)
+        if data.backups:
+            finder.check_config_backups()
 
     except KeyboardInterrupt:
         print_plain()
