@@ -33,6 +33,8 @@ class WPXFinder:
         self.config_backups = []
         self.homepage_content = None
         self.theme_in_404 = False
+        self.found_users = []
+        self.user_enum_blocked = []
 
     # ------------------------------------------------------------------
     # Headers
@@ -563,6 +565,162 @@ class WPXFinder:
             results = await asyncio.gather(*tasks)
             print_progress_done()
             return results
+
+    # ------------------------------------------------------------------
+    # User enumeration
+    # ------------------------------------------------------------------
+
+    def enumerate_users(self, techniques, users_limit=10):
+        print_status("Enumerating users...")
+        base = self.core.target_url.rstrip('/')
+        seen_slugs = set()
+
+        def _add_user(user_dict):
+            slug = user_dict.get("login") or ""
+            name = user_dict.get("name") or ""
+            if slug:
+                if slug in seen_slugs:
+                    return
+                seen_slugs.add(slug)
+            elif name:
+                if name in {u.get("name") for u in self.found_users}:
+                    return
+            else:
+                return
+            self.found_users.append(user_dict)
+
+        # 1. Passive — scan already-fetched homepage HTML for /author/slug/ links
+        if self.homepage_content:
+            for slug in set(re.findall(r'/author/([^/?#"\'<>\s]+)/', self.homepage_content)):
+                if slug not in seen_slugs:
+                    seen_slugs.add(slug)
+                    self.found_users.append({
+                        "id": None,
+                        "login": slug,
+                        "name": None,
+                        "found_by": "Passive HTML Scan",
+                        "confidence": 70,
+                        "source_url": base,
+                    })
+
+        # 2. REST API
+        rest_tech = techniques.get("rest_api")
+        if rest_tech:
+            url = f"{base}{rest_tech['endpoint']}"
+            print_status(f"Trying {rest_tech['name']}...")
+            try:
+                res = self.core.session.get(url, impersonate="firefox", timeout=15)
+                if res.status_code == 200:
+                    users = res.json()
+                    if isinstance(users, list) and users:
+                        for u in users:
+                            _add_user({
+                                "id": u.get("id"),
+                                "login": u.get("slug"),
+                                "name": u.get("name"),
+                                "found_by": rest_tech["name"],
+                                "confidence": rest_tech["confidence"],
+                                "source_url": url,
+                            })
+                    else:
+                        self.user_enum_blocked.append(rest_tech["name"])
+                else:
+                    self.user_enum_blocked.append(rest_tech["name"])
+            except Exception:
+                pass
+
+        # 3. Author archive (?author=N) — sync, typically only 1–10 requests
+        author_tech = techniques.get("author_archive")
+        if author_tech and users_limit > 0:
+            self._probe_author_archives(author_tech, users_limit, base, seen_slugs)
+
+        # 4. oEmbed — find a post URL in the homepage then query the endpoint
+        oembed_tech = techniques.get("oembed")
+        if oembed_tech and self.homepage_content:
+            post_url = None
+            for link in re.findall(
+                r'href=["\'](' + re.escape(base) + r'/[^"\'<>]+)["\']',
+                self.homepage_content,
+            ):
+                if not any(x in link for x in ['/wp-content/', '/wp-admin/', '/wp-json/', '#', '?']):
+                    post_url = link
+                    break
+            if post_url:
+                url = f"{base}{oembed_tech['endpoint']}?url={post_url}&format=json"
+                try:
+                    res = self.core.session.get(url, impersonate="firefox", timeout=10)
+                    if res.status_code == 200:
+                        author_name = res.json().get("author_name")
+                        if author_name:
+                            _add_user({
+                                "id": None,
+                                "login": None,
+                                "name": author_name,
+                                "found_by": oembed_tech["name"],
+                                "confidence": oembed_tech["confidence"],
+                                "source_url": url,
+                            })
+                except Exception:
+                    pass
+
+        # 5. RSS feed — parse dc:creator and author tags
+        rss_tech = techniques.get("rss_feed")
+        if rss_tech:
+            url = f"{base}{rss_tech['endpoint']}"
+            try:
+                res = self.core.session.get(url, impersonate="firefox", timeout=15)
+                if res.status_code == 200:
+                    creators = re.findall(
+                        r'<dc:creator><!\[CDATA\[(.*?)\]\]></dc:creator>', res.text
+                    )
+                    authors = re.findall(r'<author>([^<]+)</author>', res.text)
+                    for name in set(creators + authors):
+                        name = name.strip()
+                        if name:
+                            _add_user({
+                                "id": None,
+                                "login": None,
+                                "name": name,
+                                "found_by": rss_tech["name"],
+                                "confidence": rss_tech["confidence"],
+                                "source_url": url,
+                            })
+                elif res.status_code in (401, 403):
+                    self.user_enum_blocked.append(rss_tech["name"])
+            except Exception:
+                pass
+
+    def _probe_author_archives(self, tech, users_limit, base, seen_slugs):
+        found_any = False
+
+        for i in range(1, users_limit + 1):
+            url = f"{base}/?author={i}"
+            print_progress(f"Author archive - probing ID {i}/{users_limit}")
+            try:
+                res = self.core.session.get(
+                    url, impersonate="firefox", timeout=10, allow_redirects=True
+                )
+                final_url = str(res.url)
+                m = re.search(r'/author/([^/?#]+)/?', final_url)
+                if m:
+                    slug = m.group(1)
+                    found_any = True
+                    if slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        self.found_users.append({
+                            "id": i,
+                            "login": slug,
+                            "name": None,
+                            "found_by": tech["name"],
+                            "confidence": tech["confidence"],
+                            "source_url": url,
+                        })
+            except Exception:
+                pass
+
+        print_progress_done()
+        if not found_any:
+            self.user_enum_blocked.append(tech["name"])
 
 
 if __name__ == "__main__":

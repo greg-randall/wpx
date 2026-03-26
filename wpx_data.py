@@ -29,6 +29,7 @@ class WPXData:
         self.plugins = []
         self.backups = []
         self.wp_metadata = {}
+        self.user_enum_techniques = {}
 
         # Handle !ruby/regexp tag
         yaml.add_constructor('!ruby/regexp', self._ruby_regexp_constructor, Loader=yaml.SafeLoader)
@@ -125,6 +126,13 @@ class WPXData:
                 self.wp_metadata = data.get("wordpress", {})
             except Exception:
                 pass
+
+    def load_user_enum_techniques(self):
+        path = Path("data/user_enum_techniques.yml")
+        if path.exists():
+            with open(path) as f:
+                data = yaml.safe_load(f)
+                self.user_enum_techniques = data.get("techniques", {})
 
     def get_plugin_rules(self, slug):
         return self.dynamic_finders.get(slug, {})

@@ -55,8 +55,6 @@ def main():
     )
     parser.add_argument("--url", "-u", required=True, help="Target WordPress URL")
     parser.add_argument("--api-key", help="WPScan Vulnerability Database API Key")
-    parser.add_argument("--enumerate", "-e", choices=['p', 'vp'], default='p',
-                        help="Enumeration type: 'p' (plugins), 'vp' (vulnerable plugins)")
     parser.add_argument("--threads", "-t", type=int, default=20,
                         help="Number of concurrent threads (default: 20)")
     parser.add_argument("--plugins-limit", type=int,
@@ -67,6 +65,10 @@ def main():
                         help="Force update of WPScan metadata files")
     parser.add_argument("--no-browser", action="store_true",
                         help="Skip Camoufox WAF bypass and connect directly (no stealth)")
+    parser.add_argument("--enum-users-disable", action="store_true",
+                        help="Skip user enumeration")
+    parser.add_argument("--users-limit", type=int, default=10,
+                        help="Number of author IDs to probe via ?author=N (default: 10)")
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Suppress banner, status, and progress — show findings only")
     parser.add_argument("--output", "-o", metavar="FILE",
@@ -114,6 +116,7 @@ def _run(args):
     data.load_dynamic_finders()
     data.load_slugs()
     data.load_wp_metadata()
+    data.load_user_enum_techniques()
 
     # 2. WAF Bypass
     core = WPXCore(target_url)
@@ -191,6 +194,13 @@ def _run(args):
 
         # Version detection
         finder.detect_versions()
+
+        # User enumeration
+        if not args.enum_users_disable:
+            finder.enumerate_users(
+                techniques=data.user_enum_techniques,
+                users_limit=args.users_limit,
+            )
 
     except KeyboardInterrupt:
         print_plain()
@@ -390,6 +400,26 @@ def _run(args):
             else:
                 print_finding(slug, subitems)
             print_plain()
+
+    # --- Users ---
+    if not args.enum_users_disable:
+        if finder.found_users:
+            subitems = []
+            for u in finder.found_users:
+                login = u.get("login") or u.get("name") or "unknown"
+                uid = f"ID: {u['id']} | " if u.get("id") else ""
+                subitems.append(
+                    f"{uid}{login} | Found By: {u['found_by']} ({u['confidence']}% confidence)"
+                )
+            for method in finder.user_enum_blocked:
+                subitems.append(f"{YELLOW}Blocked:{RESET} {method}")
+            print_finding(f"User Enumeration — {len(finder.found_users)} user(s) found", subitems)
+        elif finder.user_enum_blocked:
+            subitems = [f"{GREEN}Blocked:{RESET} {m}" for m in finder.user_enum_blocked]
+            print_finding("User Enumeration — no users identified", subitems)
+        else:
+            print_info("No users identified.")
+        print_plain()
 
     # ------------------------------------------------------------------
     # 6. Summary
