@@ -18,5 +18,6 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
 RUN python3 -m camoufox fetch
+RUN python3 wpx.py --update
 
 ENTRYPOINT ["python3", "wpx.py"]
