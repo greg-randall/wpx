@@ -28,18 +28,14 @@ WPX (WordPress X-Ray) is a security scanner that uses Camoufox to solve Cloudfla
 
 ## Installation
 
-### 1. Clone the repository
+### 1. Clone and Install
 ```bash
 git clone https://github.com/wpscan/python.git wpx
 cd wpx
+pip install .
 ```
 
-### 2. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Setup Camoufox
+### 2. Setup Camoufox
 ```bash
 python3 -m camoufox fetch
 ```

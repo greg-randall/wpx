@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wordpress-xray"
+version = "1.0.0"
+description = "High-performance, stealthy WordPress security scanner with WAF bypass"
+readme = "README.md"
+authors = [{ name = "Greg Randall" }]
+license = { text = "LGPL-2.1" }
+requires-python = ">=3.8"
+dependencies = [
+    "camoufox",
+    "curl_cffi",
+    "lxml",
+    "PyYAML",
+    "packaging",
+    "beautifulsoup4",
+]
+
+[project.scripts]
+wpx = "wpx:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wpx*", "data*"]

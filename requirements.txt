@@ -2,3 +2,5 @@ camoufox
 curl_cffi
 lxml
 PyYAML
+packaging
+beautifulsoup4
