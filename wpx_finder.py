@@ -33,6 +33,7 @@ class WPXFinder:
         self.config_backups = []
         self.homepage_content = None
         self.theme_in_404 = False
+        self.multisite = None        # None = not detected, dict = found
         self.found_users = []
         self.user_enum_blocked = []
 
@@ -120,6 +121,43 @@ class WPXFinder:
 
         self.core_files = result
         return result
+
+    def detect_multisite(self):
+        """Detect WordPress Multisite via wp-signup.php and wp-activate.php."""
+        base = self.core.target_url.rstrip('/')
+        _MULTISITE_KEYWORDS = ("create a new site", "signup", "register a new site", "wordpress sites")
+
+        signup_url = f"{base}/wp-signup.php"
+        try:
+            res = self.core.session.get(signup_url, impersonate="firefox", timeout=10)
+        except Exception:
+            return
+
+        if res.status_code != 200:
+            return
+        body_lower = res.text.lower()
+        if not any(kw in body_lower for kw in _MULTISITE_KEYWORDS):
+            return
+
+        # wp-signup.php confirmed — check wp-activate.php for secondary confirmation
+        confidence = 90
+        confirmed_by = None
+        activate_url = f"{base}/wp-activate.php"
+        try:
+            act = self.core.session.get(activate_url, impersonate="firefox", timeout=10)
+            if act.status_code == 200:
+                confidence = 100
+                confirmed_by = {"url": activate_url, "found_by": "Direct Access (Aggressive Detection)"}
+        except Exception:
+            pass
+
+        self.multisite = {
+            "url": signup_url,
+            "confidence": confidence,
+            "found_by": "Direct Access (Aggressive Detection)",
+            "confirmed_by": confirmed_by,
+            "reference": "https://wordpress.org/documentation/article/create-a-network/",
+        }
 
     # ------------------------------------------------------------------
     # WP version

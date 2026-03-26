@@ -146,8 +146,9 @@ def _run(args):
         # WP version
         finder.detect_wp_version(homepage_res.text, target_url)
 
-        # Core files (robots.txt, xmlrpc, wp-cron, readme)
+        # Core files (robots.txt, xmlrpc, wp-cron, readme) + multisite
         finder.check_core_files()
+        finder.detect_multisite()
 
         # Passive plugin/theme discovery
         finder.find_passive_items(homepage_res.text)
@@ -262,6 +263,21 @@ def _run(args):
         for ref in wc["references"]:
             subitems.append(f" - {ref}")
         print_finding(f"The external WP-Cron seems to be enabled: {wc['url']}", subitems)
+        print_plain()
+
+    # --- Multisite ---
+    if finder.multisite:
+        ms = finder.multisite
+        subitems = [
+            f"Found By: {ms['found_by']}",
+            f"Confidence: {ms['confidence']}%",
+            f"Reference: {ms['reference']}",
+        ]
+        if ms.get("confirmed_by"):
+            cb = ms["confirmed_by"]
+            subitems.append(f"Confirmed By: {cb['found_by']}")
+            subitems.append(f" - {cb['url']}")
+        print_finding(f"This site appears to be a WordPress Multisite: {ms['url']}", subitems)
         print_plain()
 
     # --- WordPress readme.html ---
