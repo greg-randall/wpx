@@ -13,7 +13,7 @@ from packaging.version import Version, InvalidVersion
 from wpx_output import (
     init_output,
     print_banner, print_finding, print_info, print_warn, print_status, print_plain,
-    GREEN, YELLOW, RED, RESET,
+    GREEN, YELLOW, RED, RESET, BOLD,
 )
 
 
@@ -49,32 +49,75 @@ def _ver_status(plugin_info, api_result):
     return f"{version} ({status})"
 
 
+def _show_help():
+    print("  Usage: python3 wpx.py -u <URL> [options]\n")
+    print(f"  {BOLD}Target:{RESET}")
+    print(f"    {GREEN}-u, --url URL{RESET}           Target WordPress URL (required)")
+    print(f"    {GREEN}--api-key KEY{RESET}           WPScan Vulnerability Database API key")
+    print()
+    print(f"  {BOLD}Scan Options:{RESET}")
+    print(f"    {GREEN}-t, --threads N{RESET}         Concurrent threads (default: 20)")
+    print(f"    {GREEN}--plugins-limit N{RESET}       Scan top N plugins (default: 200)")
+    print(f"    {GREEN}--full-scan{RESET}             Scan all available plugin slugs (50k+)")
+    print(f"    {GREEN}--users-limit N{RESET}         Author IDs to probe via ?author=N (default: 10)")
+    print(f"    {GREEN}--no-browser{RESET}            Skip WAF bypass, connect directly")
+    print(f"    {GREEN}--enum-users-disable{RESET}    Skip user enumeration")
+    print()
+    print(f"  {BOLD}Output:{RESET}")
+    print(f"    {GREEN}-q, --quiet{RESET}             Findings only — suppress banner, status, progress")
+    print(f"    {GREEN}-o, --output FILE{RESET}       Save plain-text output to FILE")
+    print()
+    print(f"  {BOLD}Misc:{RESET}")
+    print(f"    {GREEN}--update{RESET}                Force refresh of WPScan metadata files")
+    print(f"    {GREEN}-h, --help{RESET}              Show this help")
+    print()
+    print(f"  {BOLD}Examples:{RESET}")
+    print("    python3 wpx.py -u https://example.com")
+    print("    python3 wpx.py -u https://example.com --api-key KEY --quiet")
+    print("    python3 wpx.py -u https://example.com --plugins-limit 1000 --output report.txt")
+    print("    python3 wpx.py -u https://example.com --full-scan --threads 50")
+    print()
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        _show_help()
+        print(f"  {YELLOW}[!]{RESET} {message}\n")
+        sys.exit(2)
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="WPX - WordPress X-Ray Scanner (Stealth & WAF-Bypass)"
-    )
-    parser.add_argument("--url", "-u", required=True, help="Target WordPress URL")
-    parser.add_argument("--api-key", help="WPScan Vulnerability Database API Key")
-    parser.add_argument("--threads", "-t", type=int, default=20,
-                        help="Number of concurrent threads (default: 20)")
-    parser.add_argument("--plugins-limit", type=int,
-                        help="Limit the number of plugins to scan (e.g. 500, 5000)")
-    parser.add_argument("--full-scan", action="store_true",
-                        help="Scan all available plugin slugs (up to 50k+ if fetched)")
-    parser.add_argument("--update", action="store_true",
-                        help="Force update of WPScan metadata files")
-    parser.add_argument("--no-browser", action="store_true",
-                        help="Skip Camoufox WAF bypass and connect directly (no stealth)")
-    parser.add_argument("--enum-users-disable", action="store_true",
-                        help="Skip user enumeration")
-    parser.add_argument("--users-limit", type=int, default=10,
-                        help="Number of author IDs to probe via ?author=N (default: 10)")
-    parser.add_argument("--quiet", "-q", action="store_true",
-                        help="Suppress banner, status, and progress — show findings only")
-    parser.add_argument("--output", "-o", metavar="FILE",
-                        help="Write output to FILE (plain text, no ANSI codes)")
+    if len(sys.argv) == 1:
+        init_output()
+        _show_help()
+        sys.exit(0)
+
+    parser = _Parser(add_help=False)
+    parser.add_argument("--url", "-u")
+    parser.add_argument("--api-key")
+    parser.add_argument("--threads", "-t", type=int, default=20)
+    parser.add_argument("--plugins-limit", type=int)
+    parser.add_argument("--full-scan", action="store_true")
+    parser.add_argument("--update", action="store_true")
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--enum-users-disable", action="store_true")
+    parser.add_argument("--users-limit", type=int, default=10)
+    parser.add_argument("--quiet", "-q", action="store_true")
+    parser.add_argument("--output", "-o", metavar="FILE")
+    parser.add_argument("--help", "-h", action="store_true")
 
     args = parser.parse_args()
+
+    if args.help:
+        init_output()
+        _show_help()
+        sys.exit(0)
+
+    if not args.url and not args.update:
+        init_output()
+        _show_help()
+        print(f"  {YELLOW}[!]{RESET} --url / -u is required\n")
+        sys.exit(2)
 
     out_file = open(args.output, 'w', encoding='utf-8') if args.output else None
     try:
@@ -91,7 +134,7 @@ def _run(args):
         data = WPXData(force_update=True)
         data.download_metadata()
         print_info("Metadata update complete.")
-        print_info("To update the full plugin catalog, run: python3 wpx_fetch_plugins.py")
+        print_info("To update the full plugin catalog, run: python3 data/wpx_fetch_plugins.py")
         sys.exit(0)
 
     target_url = args.url
