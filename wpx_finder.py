@@ -52,10 +52,6 @@ class WPXFinder:
         if self.stealth is not None:
             time.sleep(random.uniform(1.0, self.stealth * 2))
 
-    async def _stealth_delay_async(self):
-        if self.stealth is not None:
-            await asyncio.sleep(random.uniform(1.0, self.stealth * 2))
-
     def _touch_response(self):
         self.last_response_time = time.time()
 
