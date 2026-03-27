@@ -128,7 +128,7 @@ class WPXData:
                 pass
 
     def load_user_enum_techniques(self):
-        path = Path("data/user_enum_techniques.yml")
+        path = Path("user_enum_techniques.yml")
         if path.exists():
             with open(path) as f:
                 data = yaml.safe_load(f)

@@ -11,7 +11,6 @@ This directory contains the plugin datasets used by WPX and the script that buil
 | `plugins_catalog.json` | Cached metadata for active plugins (installs, downloads, rating, dates). |
 | `plugins_dead.jsonl` | Append-only cache of dead plugin metadata. Last entry wins on load. |
 | `archive.org-cache/` | Raw HTML snapshots from the Wayback Machine used to recover install counts for plugins closed before the first catalog run. |
-| `user_enum_techniques.yml` | Technique definitions for user enumeration (REST API, author archives, oEmbed, RSS). |
 
 ---
 
