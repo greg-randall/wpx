@@ -93,6 +93,7 @@ class WPXFinder:
         for filename in ["xmlrpc.php", "readme.html", "wp-cron.php", "robots.txt"]:
             url = f"{base}/{filename}"
             try:
+                self._stealth_delay()
                 res = self.core.session.get(url, impersonate="firefox", timeout=10)
 
                 if filename == "xmlrpc.php":
@@ -153,6 +154,7 @@ class WPXFinder:
 
         signup_url = f"{base}/wp-signup.php"
         try:
+            self._stealth_delay()
             res = self.core.session.get(signup_url, impersonate="firefox", timeout=10)
         except Exception:
             return
@@ -168,6 +170,7 @@ class WPXFinder:
         confirmed_by = None
         activate_url = f"{base}/wp-activate.php"
         try:
+            self._stealth_delay()
             act = self.core.session.get(activate_url, impersonate="firefox", timeout=10)
             if act.status_code == 200:
                 confidence = 100
@@ -205,6 +208,7 @@ class WPXFinder:
             # Try RSS for confirmation
             feed_url = f"{base}/feed/"
             try:
+                self._stealth_delay()
                 res = self.core.session.get(feed_url, impersonate="firefox", timeout=10)
                 rss_match = re.search(
                     r'(<generator>https://wordpress\.org/\?v=([\d.]+)</generator>)', res.text
@@ -226,6 +230,7 @@ class WPXFinder:
         # 2. RSS feed only
         feed_url = f"{base}/feed/"
         try:
+            self._stealth_delay()
             res = self.core.session.get(feed_url, impersonate="firefox", timeout=10)
             match = re.search(
                 r'(<generator>https://wordpress\.org/\?v=([\d.]+)</generator>)', res.text
@@ -295,6 +300,7 @@ class WPXFinder:
         }
 
         try:
+            self._stealth_delay()
             res = self.core.session.get(style_url, impersonate="firefox", timeout=10)
             if res.status_code == 200:
                 for line in res.text.splitlines()[:30]:
@@ -315,6 +321,7 @@ class WPXFinder:
 
         for readme_name in ["README.md", "readme.txt", "readme.md"]:
             try:
+                self._stealth_delay()
                 res = self.core.session.get(f"{location}{readme_name}", impersonate="firefox", timeout=5)
                 if res.status_code == 200:
                     result["readme_url"] = f"{location}{readme_name}"
@@ -337,6 +344,7 @@ class WPXFinder:
         # Fetch a known-404 to identify noise
         nf_content = ""
         try:
+            self._stealth_delay()
             nf_res = self.core.session.get(
                 f"{base}/wp-content/plugins/this-plugin-does-not-exist-xyz123/",
                 impersonate="firefox",
@@ -388,6 +396,7 @@ class WPXFinder:
         # Fetch a known-nonexistent path (follow redirects) to detect soft-404 content length
         baseline_len = None
         try:
+            self._stealth_delay()
             canary = self.core.session.get(
                 f"{base}/wp-config-THIS-DOES-NOT-EXIST-xyz123.bak",
                 impersonate="firefox", timeout=10, allow_redirects=True,
@@ -709,6 +718,7 @@ class WPXFinder:
             url = f"{base}{rest_tech['endpoint']}"
             print_status(f"Trying {rest_tech['name']}...")
             try:
+                self._stealth_delay()
                 res = self.core.session.get(url, impersonate="firefox", timeout=15)
                 if res.status_code == 200:
                     users = res.json()
@@ -748,6 +758,7 @@ class WPXFinder:
             if post_url:
                 url = f"{base}{oembed_tech['endpoint']}?url={post_url}&format=json"
                 try:
+                    self._stealth_delay()
                     res = self.core.session.get(url, impersonate="firefox", timeout=10)
                     if res.status_code == 200:
                         author_name = res.json().get("author_name")
@@ -768,6 +779,7 @@ class WPXFinder:
         if rss_tech:
             url = f"{base}{rss_tech['endpoint']}"
             try:
+                self._stealth_delay()
                 res = self.core.session.get(url, impersonate="firefox", timeout=15)
                 if res.status_code == 200:
                     creators = re.findall(
