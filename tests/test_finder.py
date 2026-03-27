@@ -1,3 +1,4 @@
+import asyncio
 import re
 import time
 import pytest
@@ -226,3 +227,267 @@ def test_check_idle_disabled_when_zero(finder):
     finder.idle_timeout = 0
     finder.last_response_time = time.time() - 9999  # ancient
     finder._check_idle()  # should not raise
+
+
+# --- stealth delay call sites: check_core_files ---
+
+def test_check_core_files_stealth_delay_called_per_request(mocker, finder):
+    finder.stealth = 1.5
+    mock_delay = mocker.patch.object(finder, "_stealth_delay")
+
+    resp = mocker.MagicMock()
+    resp.status_code = 404
+    finder.core.session.get.return_value = resp
+
+    finder.check_core_files()
+
+    # 4 files → 4 delays
+    assert mock_delay.call_count == 4
+
+
+def test_check_core_files_no_delay_without_stealth(mocker, finder):
+    finder.stealth = None
+    mock_sleep = mocker.patch("wpx_finder.time.sleep")
+
+    resp = mocker.MagicMock()
+    resp.status_code = 404
+    finder.core.session.get.return_value = resp
+
+    finder.check_core_files()
+
+    mock_sleep.assert_not_called()
+
+
+# --- stealth delay call sites: detect_multisite ---
+
+def test_detect_multisite_stealth_delay_called(mocker, finder):
+    finder.stealth = 1.5
+    mock_delay = mocker.patch.object(finder, "_stealth_delay")
+
+    resp = mocker.MagicMock()
+    resp.status_code = 404
+    finder.core.session.get.return_value = resp
+
+    finder.detect_multisite()
+
+    # at least the signup request must have been preceded by a delay
+    assert mock_delay.call_count >= 1
+
+
+def test_detect_multisite_no_delay_without_stealth(mocker, finder):
+    finder.stealth = None
+    mock_sleep = mocker.patch("wpx_finder.time.sleep")
+
+    resp = mocker.MagicMock()
+    resp.status_code = 404
+    finder.core.session.get.return_value = resp
+
+    finder.detect_multisite()
+
+    mock_sleep.assert_not_called()
+
+
+# --- detect_wp_version ---
+
+def test_detect_wp_version_from_meta_generator(mocker, finder):
+    content = '<meta name="generator" content="WordPress 6.4.2" />'
+
+    # RSS confirmation request returns no match
+    rss_resp = mocker.MagicMock()
+    rss_resp.text = "<rss>no version here</rss>"
+    finder.core.session.get.return_value = rss_resp
+
+    # _check_wp_latest hits api.wordpress.org — stub it out
+    mocker.patch.object(finder, "_check_wp_latest", return_value=(True, "6.4.2", "2024-01-01"))
+
+    result = finder.detect_wp_version(content)
+
+    assert result is not None
+    assert result["version"] == "6.4.2"
+    assert result["found_by"] == "Meta Generator (Passive Detection)"
+
+
+def test_detect_wp_version_from_rss_only(mocker, finder):
+    content = "<html>no generator tag here</html>"
+
+    rss_resp = mocker.MagicMock()
+    rss_resp.text = (
+        "<rss><channel>"
+        "<generator>https://wordpress.org/?v=6.3.1</generator>"
+        "</channel></rss>"
+    )
+    finder.core.session.get.return_value = rss_resp
+
+    mocker.patch.object(finder, "_check_wp_latest", return_value=(False, "6.4.2", "2024-01-01"))
+
+    result = finder.detect_wp_version(content)
+
+    assert result is not None
+    assert result["version"] == "6.3.1"
+    assert result["found_by"] == "Rss Generator (Aggressive Detection)"
+
+
+def test_detect_wp_version_returns_none_when_not_found(mocker, finder):
+    content = "<html>no generator</html>"
+
+    rss_resp = mocker.MagicMock()
+    rss_resp.text = "<rss>nothing useful</rss>"
+    finder.core.session.get.return_value = rss_resp
+
+    result = finder.detect_wp_version(content)
+
+    assert result is None
+
+
+def test_detect_wp_version_stealth_delay_called(mocker, finder):
+    finder.stealth = 1.5
+    mock_delay = mocker.patch.object(finder, "_stealth_delay")
+
+    rss_resp = mocker.MagicMock()
+    rss_resp.text = "<rss>nothing</rss>"
+    finder.core.session.get.return_value = rss_resp
+
+    finder.detect_wp_version("<html></html>")
+
+    assert mock_delay.call_count >= 1
+
+
+# --- async stealth delay: _scan_plugins_async ---
+
+@pytest.mark.asyncio
+async def test_scan_plugins_async_stealth_delay_awaited(mocker, finder):
+    finder.stealth = 2.0
+
+    sleep_calls = []
+
+    async def fake_sleep(duration):
+        sleep_calls.append(duration)
+
+    mocker.patch("wpx_finder.asyncio.sleep", side_effect=fake_sleep)
+
+    mock_resp = mocker.MagicMock()
+    mock_resp.status_code = 404
+
+    async def fake_get(*args, **kwargs):
+        return mock_resp
+
+    mock_session = mocker.MagicMock()
+    mock_session.get = fake_get
+    mock_session.__aenter__ = mocker.AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = mocker.AsyncMock(return_value=False)
+
+    mocker.patch("curl_cffi.requests.AsyncSession", return_value=mock_session)
+    mocker.patch("wpx_finder.print_progress")
+    mocker.patch("wpx_finder.print_progress_done")
+
+    await finder._scan_plugins_async(["akismet", "jetpack"], concurrency=1)
+
+    assert len(sleep_calls) == 2
+    for d in sleep_calls:
+        assert 1.0 <= d <= 4.0  # stealth=2.0 → uniform(1.0, 4.0)
+
+
+@pytest.mark.asyncio
+async def test_scan_plugins_async_no_sleep_without_stealth(mocker, finder):
+    finder.stealth = None
+
+    sleep_calls = []
+
+    async def fake_sleep(duration):
+        sleep_calls.append(duration)
+
+    mocker.patch("wpx_finder.asyncio.sleep", side_effect=fake_sleep)
+
+    mock_resp = mocker.MagicMock()
+    mock_resp.status_code = 404
+
+    async def fake_get(*args, **kwargs):
+        return mock_resp
+
+    mock_session = mocker.MagicMock()
+    mock_session.get = fake_get
+    mock_session.__aenter__ = mocker.AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = mocker.AsyncMock(return_value=False)
+
+    mocker.patch("curl_cffi.requests.AsyncSession", return_value=mock_session)
+    mocker.patch("wpx_finder.print_progress")
+    mocker.patch("wpx_finder.print_progress_done")
+
+    await finder._scan_plugins_async(["akismet", "jetpack"], concurrency=2)
+
+    assert sleep_calls == []
+
+
+# --- async stealth delay: _detect_versions_async ---
+
+@pytest.mark.asyncio
+async def test_detect_versions_async_stealth_delay_awaited(mocker, finder):
+    finder.stealth = 2.0
+    finder.found_plugins = {"akismet": {}}
+    finder.threads = 1
+
+    sleep_calls = []
+
+    async def fake_sleep(duration):
+        sleep_calls.append(duration)
+
+    mocker.patch("wpx_finder.asyncio.sleep", side_effect=fake_sleep)
+
+    # data returns a Readme rule for the plugin
+    finder.data.get_plugin_rules.return_value = {"Readme": {"path": "readme.txt"}}
+
+    mock_resp = mocker.MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "Stable tag: 1.2.3"
+
+    async def fake_get(*args, **kwargs):
+        return mock_resp
+
+    mock_session = mocker.MagicMock()
+    mock_session.get = fake_get
+    mock_session.__aenter__ = mocker.AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = mocker.AsyncMock(return_value=False)
+
+    mocker.patch("curl_cffi.requests.AsyncSession", return_value=mock_session)
+    mocker.patch("wpx_finder.print_progress")
+    mocker.patch("wpx_finder.print_progress_done")
+
+    await finder._detect_versions_async()
+
+    assert len(sleep_calls) == 1
+    assert 1.0 <= sleep_calls[0] <= 4.0
+
+
+@pytest.mark.asyncio
+async def test_detect_versions_async_no_sleep_without_stealth(mocker, finder):
+    finder.stealth = None
+    finder.found_plugins = {"akismet": {}}
+    finder.threads = 2
+
+    sleep_calls = []
+
+    async def fake_sleep(duration):
+        sleep_calls.append(duration)
+
+    mocker.patch("wpx_finder.asyncio.sleep", side_effect=fake_sleep)
+
+    finder.data.get_plugin_rules.return_value = {"Readme": {"path": "readme.txt"}}
+
+    mock_resp = mocker.MagicMock()
+    mock_resp.status_code = 404
+
+    async def fake_get(*args, **kwargs):
+        return mock_resp
+
+    mock_session = mocker.MagicMock()
+    mock_session.get = fake_get
+    mock_session.__aenter__ = mocker.AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = mocker.AsyncMock(return_value=False)
+
+    mocker.patch("curl_cffi.requests.AsyncSession", return_value=mock_session)
+    mocker.patch("wpx_finder.print_progress")
+    mocker.patch("wpx_finder.print_progress_done")
+
+    await finder._detect_versions_async()
+
+    assert sleep_calls == []
