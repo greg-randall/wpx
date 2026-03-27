@@ -183,9 +183,10 @@ def _run(args):
 
     # 3. Discovery Engine
     if args.stealth is not None and args.threads == 20:
-        args.threads = 3
-        print_status(f"Stealth mode: threads capped at 3, delays 1.0–{args.stealth * 2:.1f}s")
-    finder = WPXFinder(core, data, stealth=args.stealth, idle_timeout=args.idle_timeout)
+        args.threads = 1
+        print_status(f"Stealth mode: threads capped at 1, delays 1.0–{args.stealth * 2:.1f}s")
+    finder = WPXFinder(core, data, stealth=args.stealth, idle_timeout=args.idle_timeout,
+                       threads=args.threads)
 
     try:
         # Homepage

@@ -29,9 +29,10 @@ INTERESTING_HEADERS = [
 
 
 class WPXFinder:
-    def __init__(self, core, data, stealth=None, idle_timeout=60):
+    def __init__(self, core, data, stealth=None, idle_timeout=60, threads=20):
         self.core = core
         self.data = data
+        self.threads = threads
         self.found_plugins = {}
         self.wp_version = None       # structured dict
         self.theme = None            # slug string initially, then structured dict
@@ -50,6 +51,10 @@ class WPXFinder:
     def _stealth_delay(self):
         if self.stealth is not None:
             time.sleep(random.uniform(1.0, self.stealth * 2))
+
+    async def _stealth_delay_async(self):
+        if self.stealth is not None:
+            await asyncio.sleep(random.uniform(1.0, self.stealth * 2))
 
     def _touch_response(self):
         self.last_response_time = time.time()
@@ -570,7 +575,7 @@ class WPXFinder:
         base_url = self.core.target_url.rstrip('/')
         headers = dict(self.core.session.headers)
         cookies = dict(self.core.cookies)
-        sem = asyncio.Semaphore(3 if self.stealth is not None else 10)
+        sem = asyncio.Semaphore(self.threads)
         slugs = list(self.found_plugins.keys())
         total = len(slugs)
         completed = 0
