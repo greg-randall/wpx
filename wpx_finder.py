@@ -381,11 +381,9 @@ class WPXFinder:
     # ------------------------------------------------------------------
 
     def check_config_backups(self):
-        """Check for config backup files with inline progress. Returns list of found URLs."""
+        """Check for config backup files concurrently. Returns list of found URLs."""
         base = self.core.target_url.rstrip('/')
         backups = self.data.backups
-        total = len(backups)
-        found = []
 
         # Fetch a known-nonexistent path (follow redirects) to detect soft-404 content length
         baseline_len = None
@@ -399,34 +397,57 @@ class WPXFinder:
         except Exception:
             pass
 
-        for i, path in enumerate(backups):
-            self._check_idle()
-            url = f"{base}/{path}"
-            pct = (i + 1) / total * 100
-            print_progress(f"Checking Config Backups - ({i + 1} / {total}) {pct:.2f}%")
-            try:
-                res = self.core.session.get(url, impersonate="firefox", timeout=10, allow_redirects=True)
-                self._touch_response()
-                if res.status_code == 200:
-                    body = res.content
-                    # Must contain PHP config file markers to be a real backup
-                    if not any(m in body for m in [b'<?php', b'DB_NAME', b'DB_PASSWORD']):
-                        continue
-                    # Reject responses that match the soft-404 baseline (within 5%)
-                    if baseline_len is not None:
-                        body_len = len(body)
-                        if body_len > 0 and abs(body_len - baseline_len) / baseline_len < 0.05:
-                            continue
-                    found.append(url)
-            except ScanIdleTimeout:
-                raise
-            except Exception:
-                pass
-            self._stealth_delay()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            found = pool.submit(
+                asyncio.run, self._check_config_backups_async(backups, base, baseline_len)
+            ).result()
 
-        print_progress_done()
         self.config_backups = found
         return found
+
+    async def _check_config_backups_async(self, backups, base, baseline_len):
+        from curl_cffi.requests import AsyncSession
+        headers = dict(self.core.session.headers)
+        cookies = dict(self.core.cookies)
+        sem = asyncio.Semaphore(self.threads)
+        total = len(backups)
+        completed = 0
+
+        async def check_one(session, path):
+            nonlocal completed
+            self._check_idle()
+            url = f"{base}/{path}"
+            async with sem:
+                try:
+                    if self.stealth is not None:
+                        await asyncio.sleep(random.uniform(1.0, self.stealth * 2))
+                    res = await session.get(
+                        url, headers=headers, cookies=cookies,
+                        impersonate="firefox", timeout=10, allow_redirects=True,
+                    )
+                    self._touch_response()
+                    completed += 1
+                    pct = completed / total * 100
+                    print_progress(f"Checking Config Backups - ({completed} / {total}) {pct:.2f}%")
+                    if res.status_code == 200:
+                        body = res.content
+                        if not any(m in body for m in [b'<?php', b'DB_NAME', b'DB_PASSWORD']):
+                            return None
+                        if baseline_len is not None:
+                            body_len = len(body)
+                            if body_len > 0 and abs(body_len - baseline_len) / baseline_len < 0.05:
+                                return None
+                        return url
+                except ScanIdleTimeout:
+                    raise
+                except Exception:
+                    completed += 1
+            return None
+
+        async with AsyncSession() as session:
+            results = await asyncio.gather(*[check_one(session, p) for p in backups])
+            print_progress_done()
+            return [r for r in results if r is not None]
 
     # ------------------------------------------------------------------
     # Plugin brute-force
@@ -468,6 +489,8 @@ class WPXFinder:
             plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
             async with sem:
                 try:
+                    if self.stealth is not None:
+                        await asyncio.sleep(random.uniform(1.0, self.stealth * 2))
                     res = await session.get(
                         plugin_url,
                         headers=headers,
@@ -606,6 +629,8 @@ class WPXFinder:
                 readme_url = f"{base_plugin_url}{readme_path}"
                 async with sem:
                     try:
+                        if self.stealth is not None:
+                            await asyncio.sleep(random.uniform(1.0, self.stealth * 2))
                         res = await session.get(
                             readme_url,
                             headers=headers,
