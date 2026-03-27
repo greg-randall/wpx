@@ -147,6 +147,8 @@ The `data/` directory contains the processed plugin datasets and maintenance too
 | `--no-browser` | Skip Camoufox WAF bypass and connect directly. |
 | `--enum-users-disable` | Skip user enumeration. |
 | `--users-limit N` | Number of author IDs to probe via ?author=N (default: 10). |
+| `--stealth [N]` | Add random delays between requests. Floor is 1s, ceiling is 2×N seconds (default when flag is set: 1.5 → 1–3s). Also caps threads to 3. |
+| `--idle-timeout N` | Abort if no server response received for N seconds (default: 60, 0 = disabled). |
 | `-q, --quiet` | Suppress banner, status, and progress — show findings only. |
 | `-o, --output FILE` | Write output to FILE (plain text, no ANSI codes). |
 
