@@ -44,6 +44,7 @@ class WPXFinder:
         self.multisite = None        # None = not detected, dict = found
         self.found_users = []
         self.user_enum_blocked = []
+        self.user_enum_ran = False
         self.stealth = stealth             # float or None
         self.idle_timeout = idle_timeout   # seconds, 0 = disabled
         self.last_response_time = time.time()
@@ -680,6 +681,7 @@ class WPXFinder:
     # ------------------------------------------------------------------
 
     def enumerate_users(self, techniques, users_limit=10):
+        self.user_enum_ran = True
         print_status("Enumerating users...")
         base = self.core.target_url.rstrip('/')
         seen_slugs = set()

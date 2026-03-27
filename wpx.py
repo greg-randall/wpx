@@ -185,6 +185,11 @@ def _run(args):
     if args.stealth is not None and args.threads == 20:
         args.threads = 1
         print_status(f"Stealth mode: threads capped at 1, delays 1.0–{args.stealth * 2:.1f}s")
+    if args.stealth is not None and args.idle_timeout:
+        min_idle = int(args.stealth * 2) + 20
+        if args.idle_timeout < min_idle:
+            args.idle_timeout = min_idle
+            print_status(f"Idle timeout raised to {min_idle}s to accommodate stealth delays.")
     finder = WPXFinder(core, data, stealth=args.stealth, idle_timeout=args.idle_timeout,
                        threads=args.threads)
 
@@ -474,7 +479,7 @@ def _run(args):
             print_plain()
 
     # --- Users ---
-    if not args.enum_users_disable:
+    if not args.enum_users_disable and finder.user_enum_ran:
         found_users = finder.found_users
         blocked = finder.user_enum_blocked
         has_found = bool(found_users)
