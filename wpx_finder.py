@@ -1,8 +1,15 @@
 import asyncio
 import concurrent.futures
+import random
 import re
+import time
 from lxml import html
 from wpx_output import print_status, print_info, print_progress, print_progress_done
+
+
+class ScanIdleTimeout(Exception):
+    pass
+
 
 XMLRPC_REFERENCES = [
     "http://codex.wordpress.org/XML-RPC_Pingback_API",
@@ -22,7 +29,7 @@ INTERESTING_HEADERS = [
 
 
 class WPXFinder:
-    def __init__(self, core, data):
+    def __init__(self, core, data, stealth=None, idle_timeout=60):
         self.core = core
         self.data = data
         self.found_plugins = {}
@@ -36,6 +43,22 @@ class WPXFinder:
         self.multisite = None        # None = not detected, dict = found
         self.found_users = []
         self.user_enum_blocked = []
+        self.stealth = stealth             # float or None
+        self.idle_timeout = idle_timeout   # seconds, 0 = disabled
+        self.last_response_time = time.time()
+
+    def _stealth_delay(self):
+        if self.stealth is not None:
+            time.sleep(random.uniform(1.0, self.stealth * 2))
+
+    def _touch_response(self):
+        self.last_response_time = time.time()
+
+    def _check_idle(self):
+        if self.idle_timeout and time.time() - self.last_response_time > self.idle_timeout:
+            raise ScanIdleTimeout(
+                f"No server response in {self.idle_timeout}s — server may be blocking us."
+            )
 
     # ------------------------------------------------------------------
     # Headers
@@ -376,11 +399,13 @@ class WPXFinder:
             pass
 
         for i, path in enumerate(backups):
+            self._check_idle()
             url = f"{base}/{path}"
             pct = (i + 1) / total * 100
             print_progress(f"Checking Config Backups - ({i + 1} / {total}) {pct:.2f}%")
             try:
                 res = self.core.session.get(url, impersonate="firefox", timeout=10, allow_redirects=True)
+                self._touch_response()
                 if res.status_code == 200:
                     body = res.content
                     # Must contain PHP config file markers to be a real backup
@@ -392,8 +417,11 @@ class WPXFinder:
                         if body_len > 0 and abs(body_len - baseline_len) / baseline_len < 0.05:
                             continue
                     found.append(url)
+            except ScanIdleTimeout:
+                raise
             except Exception:
                 pass
+            self._stealth_delay()
 
         print_progress_done()
         self.config_backups = found
@@ -435,6 +463,7 @@ class WPXFinder:
 
         async def check_plugin(session, slug):
             nonlocal completed
+            self._check_idle()
             plugin_url = f"{base_url}/wp-content/plugins/{slug}/"
             async with sem:
                 try:
@@ -446,11 +475,14 @@ class WPXFinder:
                         timeout=10,
                         allow_redirects=False,
                     )
+                    self._touch_response()
                     completed += 1
                     pct = completed / total * 100
                     print_progress(f"Brute-forcing plugins - ({completed} / {total}) {pct:.2f}%")
                     if res.status_code in [200, 403]:
                         return slug, res.status_code
+                except ScanIdleTimeout:
+                    raise
                 except Exception:
                     completed += 1
             return None
@@ -538,13 +570,14 @@ class WPXFinder:
         base_url = self.core.target_url.rstrip('/')
         headers = dict(self.core.session.headers)
         cookies = dict(self.core.cookies)
-        sem = asyncio.Semaphore(10)
+        sem = asyncio.Semaphore(3 if self.stealth is not None else 10)
         slugs = list(self.found_plugins.keys())
         total = len(slugs)
         completed = 0
 
         async def process_version(session, slug):
             nonlocal completed
+            self._check_idle()
             rules = self.data.get_plugin_rules(slug)
             if not rules:
                 completed += 1
@@ -579,6 +612,7 @@ class WPXFinder:
                             impersonate="firefox",
                             timeout=10,
                         )
+                        self._touch_response()
                         completed += 1
                         pct = completed / total * 100
                         print_progress(f"Detecting versions - ({completed} / {total}) {pct:.2f}%")
@@ -589,6 +623,8 @@ class WPXFinder:
                             if stable:
                                 return (slug, stable.group(1), 100,
                                         "Readme - Stable Tag (Aggressive Detection)", readme_url)
+                    except ScanIdleTimeout:
+                        raise
                     except Exception:
                         pass
             else:
@@ -732,6 +768,7 @@ class WPXFinder:
         found_any = False
 
         for i in range(1, users_limit + 1):
+            self._check_idle()
             url = f"{base}/?author={i}"
             print_progress(f"Author archive - probing ID {i}/{users_limit}")
             try:
@@ -741,6 +778,7 @@ class WPXFinder:
                 res = self.core.session.get(
                     url, impersonate="firefox", timeout=10, allow_redirects=False
                 )
+                self._touch_response()
                 slug = None
                 if res.status_code in (301, 302, 303, 307, 308):
                     location = res.headers.get("Location") or res.headers.get("location", "")
@@ -764,8 +802,11 @@ class WPXFinder:
                             "confidence": tech["confidence"],
                             "source_url": url,
                         })
+            except ScanIdleTimeout:
+                raise
             except Exception:
                 pass
+            self._stealth_delay()
 
         print_progress_done()
         if not found_any:

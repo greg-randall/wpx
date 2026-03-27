@@ -1,4 +1,7 @@
 import re
+import time
+import pytest
+from wpx_finder import ScanIdleTimeout
 
 
 # --- _extract_version ---
@@ -167,3 +170,59 @@ def test_probe_author_archives_deduplication(mocker, finder):
     seen = {"admin"}  # already known
     finder._probe_author_archives(tech, users_limit=1, base="https://example.com", seen_slugs=seen)
     assert finder.found_users == []  # not added again
+
+
+# --- _stealth_delay ---
+
+def test_stealth_delay_sleeps_when_active(mocker, finder):
+    finder.stealth = 1.5
+    mock_sleep = mocker.patch("wpx_finder.time.sleep")
+    finder._stealth_delay()
+    mock_sleep.assert_called_once()
+    delay = mock_sleep.call_args[0][0]
+    assert 1.0 <= delay <= 3.0
+
+
+def test_stealth_delay_noop_when_none(mocker, finder):
+    finder.stealth = None
+    mock_sleep = mocker.patch("wpx_finder.time.sleep")
+    finder._stealth_delay()
+    mock_sleep.assert_not_called()
+
+
+def test_stealth_delay_range_scales_with_value(mocker, finder):
+    finder.stealth = 10.0
+    mock_sleep = mocker.patch("wpx_finder.time.sleep")
+    # call several times to check the range stays within 1–20s
+    for _ in range(20):
+        finder._stealth_delay()
+    for call in mock_sleep.call_args_list:
+        delay = call[0][0]
+        assert 1.0 <= delay <= 20.0
+
+
+# --- _touch_response / _check_idle ---
+
+def test_touch_response_resets_clock(finder):
+    finder.last_response_time = 0.0  # very old
+    finder._touch_response()
+    assert time.time() - finder.last_response_time < 1.0
+
+
+def test_check_idle_raises_when_expired(finder):
+    finder.idle_timeout = 30
+    finder.last_response_time = time.time() - 60  # 60s ago
+    with pytest.raises(ScanIdleTimeout):
+        finder._check_idle()
+
+
+def test_check_idle_silent_within_window(finder):
+    finder.idle_timeout = 60
+    finder.last_response_time = time.time()  # just now
+    finder._check_idle()  # should not raise
+
+
+def test_check_idle_disabled_when_zero(finder):
+    finder.idle_timeout = 0
+    finder.last_response_time = time.time() - 9999  # ancient
+    finder._check_idle()  # should not raise

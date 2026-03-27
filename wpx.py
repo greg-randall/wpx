@@ -7,7 +7,7 @@ from pathlib import Path
 
 from wpx_data import WPXData
 from wpx_core import WPXCore
-from wpx_finder import WPXFinder
+from wpx_finder import WPXFinder, ScanIdleTimeout
 from wpx_vulnerability import WPXVulnerability
 from packaging.version import Version, InvalidVersion
 from wpx_output import (
@@ -102,6 +102,11 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--enum-users-disable", action="store_true")
     parser.add_argument("--users-limit", type=int, default=10)
+    parser.add_argument("--stealth", type=float, nargs='?', const=1.5, default=None,
+                        metavar='N',
+                        help="Add random delays (default 1.5 = 1–3s, --stealth 5 = 1–10s).")
+    parser.add_argument("--idle-timeout", type=int, default=60, metavar='N',
+                        help="Abort if no server response for N seconds (default: 60, 0 = off).")
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--output", "-o", metavar="FILE")
     parser.add_argument("--help", "-h", action="store_true")
@@ -177,7 +182,10 @@ def _run(args):
         sys.exit(1)
 
     # 3. Discovery Engine
-    finder = WPXFinder(core, data)
+    if args.stealth is not None and args.threads == 20:
+        args.threads = 3
+        print_status(f"Stealth mode: threads capped at 3, delays 1.0–{args.stealth * 2:.1f}s")
+    finder = WPXFinder(core, data, stealth=args.stealth, idle_timeout=args.idle_timeout)
 
     try:
         # Homepage
@@ -249,6 +257,10 @@ def _run(args):
     except KeyboardInterrupt:
         print_plain()
         print_warn("Scan interrupted by user (Ctrl+C). Showing partial results...")
+    except ScanIdleTimeout as e:
+        print_plain()
+        print_warn(f"Scan aborted: {e}")
+        print_warn("Showing partial results...")
 
     # 5. Vulnerability API
     vuln_api = WPXVulnerability(api_key=args.api_key)
