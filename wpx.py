@@ -55,13 +55,19 @@ def _show_help():
     print(f"    {GREEN}-u, --url URL{RESET}           Target WordPress URL (required)")
     print(f"    {GREEN}--api-key KEY{RESET}           WPScan Vulnerability Database API key")
     print()
+    print(f"  {BOLD}Enumeration:{RESET}")
+    print(f"    {GREEN}-e, --enumerate OPTS{RESET}    Comma-separated list of what to scan (default: all)")
+    print(f"                            {GREEN}p{RESET}   Plugin brute-force + version detection")
+    print(f"                            {GREEN}u{RESET}   User enumeration")
+    print(f"                            {GREEN}cb{RESET}  Config backup files")
+    print(f"                            {GREEN}t{RESET}   Theme version detection")
+    print()
     print(f"  {BOLD}Scan Options:{RESET}")
     print(f"    {GREEN}-t, --threads N{RESET}         Concurrent threads (default: 20)")
     print(f"    {GREEN}--plugins-limit N{RESET}       Scan top N plugins (default: 200)")
     print(f"    {GREEN}--full-scan{RESET}             Scan all available plugin slugs (50k+)")
     print(f"    {GREEN}--users-limit N{RESET}         Author IDs to probe via ?author=N (default: 10)")
     print(f"    {GREEN}--no-browser{RESET}            Skip WAF bypass, connect directly")
-    print(f"    {GREEN}--enum-users-disable{RESET}    Skip user enumeration")
     print()
     print(f"  {BOLD}Output:{RESET}")
     print(f"    {GREEN}-q, --quiet{RESET}             Findings only — suppress banner, status, progress")
@@ -73,9 +79,10 @@ def _show_help():
     print()
     print(f"  {BOLD}Examples:{RESET}")
     print("    python3 wpx.py -u https://example.com")
-    print("    python3 wpx.py -u https://example.com --api-key KEY --quiet")
-    print("    python3 wpx.py -u https://example.com --plugins-limit 1000 --output report.txt")
-    print("    python3 wpx.py -u https://example.com --full-scan --threads 50")
+    print("    python3 wpx.py -u https://example.com -e u")
+    print("    python3 wpx.py -u https://example.com -e p,u --plugins-limit 500")
+    print("    python3 wpx.py -u https://example.com -e p,cb --api-key KEY --quiet")
+    print("    python3 wpx.py -u https://example.com -e p --full-scan --threads 50")
     print()
 
 
@@ -100,7 +107,7 @@ def main():
     parser.add_argument("--full-scan", action="store_true")
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--enum-users-disable", action="store_true")
+    parser.add_argument("--enumerate", "-e", metavar="OPTS", default=None)
     parser.add_argument("--users-limit", type=int, default=10)
     parser.add_argument("--stealth", type=float, nargs='?', const=1.5, default=None,
                         metavar='N',
@@ -133,6 +140,24 @@ def main():
             out_file.close()
 
 
+_ALL_TOKENS = {"p", "u", "cb", "t"}
+
+
+def _parse_enumerate(value):
+    """Parse -e token string. Returns set of tokens, or exits on invalid input."""
+    if not value:
+        return set(_ALL_TOKENS)
+    raw = {tok.strip().lower() for tok in value.split(",")}
+    invalid = raw - _ALL_TOKENS
+    if invalid:
+        print_warn(
+            f"Unknown enumerate option(s): {', '.join(sorted(invalid))}. "
+            f"Valid: {', '.join(sorted(_ALL_TOKENS))}"
+        )
+        sys.exit(2)
+    return raw
+
+
 def _run(args):
     if args.update:
         print_banner()
@@ -141,6 +166,12 @@ def _run(args):
         print_info("Metadata update complete.")
         print_info("To update the full plugin catalog, run: python3 data/wpx_fetch_plugins.py")
         sys.exit(0)
+
+    tokens = _parse_enumerate(args.enumerate)
+    do_plugins = "p" in tokens
+    do_users = "u" in tokens
+    do_backups = "cb" in tokens
+    do_theme = "t" in tokens
 
     target_url = args.url
     if "://" not in target_url:
@@ -210,54 +241,56 @@ def _run(args):
         # Passive plugin/theme discovery
         finder.find_passive_items(homepage_res.text)
 
-        # Theme details
-        finder.detect_theme_details()
+        # Theme details (active fetch — only when t token active)
+        if do_theme:
+            finder.detect_theme_details()
 
-        # 4. Active plugin brute-force selection
-        best_source = None
-        for candidate in [Path("data/plugins_full.txt"), Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")]:
-            if candidate.exists():
-                best_source = candidate
-                break
+        # Plugin brute-force + version detection (only when p token active)
+        if do_plugins:
+            best_source = None
+            for candidate in [
+                Path("data/plugins_full.txt"), Path("plugins_full.txt"), Path(".wpx_data/plugins_full.txt")
+            ]:
+                if candidate.exists():
+                    best_source = candidate
+                    break
 
-        if best_source:
-            with open(best_source) as f:
-                all_slugs = [line.strip() for line in f if line.strip()]
-            source_name = str(best_source)
-        else:
-            all_slugs = data.plugins
-            source_name = "WPScan default list"
+            if best_source:
+                with open(best_source) as f:
+                    all_slugs = [line.strip() for line in f if line.strip()]
+                source_name = str(best_source)
+            else:
+                all_slugs = data.plugins
+                source_name = "WPScan default list"
 
-        if not all_slugs:
-            print_warn("No plugin slugs found. Skipping active enumeration.")
-            slugs = []
-        elif args.full_scan:
-            slugs = all_slugs
-            print_status(f"Full scan: {len(slugs):,} slugs from {source_name}")
-        elif args.plugins_limit:
-            slugs = all_slugs[:args.plugins_limit]
-            print_status(
-                f"Limited scan: {len(slugs):,} slugs (top {args.plugins_limit}) from {source_name}"
-            )
-        else:
-            slugs = all_slugs[:200]
-            print_status(f"Default scan: {len(slugs):,} slugs (top 200) from {source_name}")
+            if not all_slugs:
+                print_warn("No plugin slugs found. Skipping active enumeration.")
+                slugs = []
+            elif args.full_scan:
+                slugs = all_slugs
+                print_status(f"Full scan: {len(slugs):,} slugs from {source_name}")
+            elif args.plugins_limit:
+                slugs = all_slugs[:args.plugins_limit]
+                print_status(
+                    f"Limited scan: {len(slugs):,} slugs (top {args.plugins_limit}) from {source_name}"
+                )
+            else:
+                slugs = all_slugs[:200]
+                print_status(f"Default scan: {len(slugs):,} slugs (top 200) from {source_name}")
 
-        if slugs:
-            finder.scan_plugins(slugs, threads=args.threads)
-
-        # Version detection
-        finder.detect_versions()
+            if slugs:
+                finder.scan_plugins(slugs, threads=args.threads)
+            finder.detect_versions()
 
         # User enumeration
-        if not args.enum_users_disable:
+        if do_users:
             finder.enumerate_users(
                 techniques=data.user_enum_techniques,
                 users_limit=args.users_limit,
             )
 
         # Config backups (low hit rate — run last to preserve requests for high-value checks)
-        if data.backups:
+        if do_backups and data.backups:
             finder.check_config_backups()
 
     except KeyboardInterrupt:
@@ -406,13 +439,13 @@ def _run(args):
         print_plain()
 
     # --- Config Backups ---
-    if finder.config_backups:
+    if do_backups and finder.config_backups:
         for bu in finder.config_backups:
             print_finding(f"A Config Backup file has been found: {bu}")
         print_plain()
 
     # --- Plugins ---
-    if not finder.found_plugins:
+    if do_plugins and not finder.found_plugins:
         print_info("No plugins detected.")
     else:
         for slug, info in finder.found_plugins.items():
@@ -479,7 +512,7 @@ def _run(args):
             print_plain()
 
     # --- Users ---
-    if not args.enum_users_disable and finder.user_enum_ran:
+    if finder.user_enum_ran:
         found_users = finder.found_users
         blocked = finder.user_enum_blocked
         has_found = bool(found_users)

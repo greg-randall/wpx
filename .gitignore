@@ -10,3 +10,5 @@ old/*
 data/archive.org-cache/
 *.txt
 !example-output.txt
+
+*.sh
